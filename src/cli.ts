@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 import { loadConfig, resolveVaultPath } from "./config.ts";
 import { formatInitReport, initVault } from "./init.ts";
 import {
@@ -6,25 +6,30 @@ import {
   injectHarnesses,
   type InjectTarget,
 } from "./inject.ts";
+import { isMainModule, processArgs } from "./runtime.ts";
+import { runSetup } from "./setup.ts";
 
-type Command = "init" | "inject" | "ingest" | "help";
+type Command = "setup" | "init" | "inject" | "ingest" | "help";
 
 function printHelp(): void {
-  console.log(`brain — second-brain scaffolding CLI
+  console.log(`brain — portable second-brain CLI (Bun or Node)
 
 Usage:
-  bun run brain -- <command> [options]
+  npm run setup -- [--vault <dir>] [--target all|cursor|claude|codex|zed]
+  bun run setup -- [--vault <dir>] [--target all|cursor|claude|codex|zed]
+  npm run brain -- <command> [options]
 
-Commands:
-  init [--path <dir>]     Create Obsidian vault structure (idempotent)
-  inject [--target <t>]   Inject memory rules + MCP into harnesses
-                          targets: cursor | claude | codex | all
-  ingest                  Promote vault/external into notes (phase 5+)
-  help                    Show this help
+Primary (use this to install):
+  setup                   Write config + create vault + inject harnesses
 
-Config:
-  Copy config.example.toml → config.toml
-  BRAIN_VAULT env overrides vault_path
+Advanced:
+  init [--path <dir>]     Vault folders only
+  inject [--target <t>]   Harness MCP/rules only
+  ingest                  (planned) promote external/ drops
+  help
+
+Env:
+  BRAIN_VAULT             Overrides vault path
 `);
 }
 
@@ -35,13 +40,12 @@ function parseArgs(argv: string[]): {
 } {
   const [commandRaw, ...rest] = argv;
   const command = (commandRaw ?? "help") as Command;
-
   let path: string | undefined;
   let target: string | undefined;
 
   for (let i = 0; i < rest.length; i++) {
     const arg = rest[i];
-    if (arg === "--path") {
+    if (arg === "--path" || arg === "--vault") {
       path = rest[++i];
       continue;
     }
@@ -49,28 +53,21 @@ function parseArgs(argv: string[]): {
       target = rest[++i];
       continue;
     }
-    if (arg?.startsWith("--path=")) {
-      path = arg.slice("--path=".length);
-      continue;
-    }
-    if (arg?.startsWith("--target=")) {
-      target = arg.slice("--target=".length);
-      continue;
-    }
+    if (arg?.startsWith("--path=")) path = arg.slice("--path=".length);
+    if (arg?.startsWith("--vault=")) path = arg.slice("--vault=".length);
+    if (arg?.startsWith("--target=")) target = arg.slice("--target=".length);
   }
-
   return { command, path, target };
 }
 
 async function cmdInit(pathOverride?: string): Promise<void> {
   const config = await loadConfig();
   const vault = resolveVaultPath(config.vault_path, pathOverride);
-  const result = await initVault(vault);
-  console.log(formatInitReport(result));
+  console.log(formatInitReport(await initVault(vault)));
 }
 
 async function cmdInject(targetRaw = "all"): Promise<void> {
-  const allowed = new Set(["cursor", "claude", "codex", "all"]);
+  const allowed = new Set(["cursor", "claude", "codex", "zed", "all"]);
   if (!allowed.has(targetRaw)) {
     console.error(`Unknown inject target: ${targetRaw}`);
     process.exitCode = 1;
@@ -82,17 +79,16 @@ async function cmdInject(targetRaw = "all"): Promise<void> {
   console.log(formatInjectReport(vaultPath, actions));
 }
 
-async function cmdIngest(): Promise<void> {
-  const config = await loadConfig();
-  const vault = resolveVaultPath(config.vault_path);
-  console.log(`[ingest] stub — would scan: ${vault}/external`);
-  console.log("[ingest] not implemented yet (phase 5)");
-}
-
 async function main(): Promise<void> {
-  const { command, path, target } = parseArgs(Bun.argv.slice(2));
+  const { command, path, target } = parseArgs(processArgs());
 
   switch (command) {
+    case "setup":
+      await runSetup({
+        vault: path,
+        target: (target as InjectTarget) || "all",
+      });
+      break;
     case "init":
       await cmdInit(path);
       break;
@@ -100,7 +96,7 @@ async function main(): Promise<void> {
       await cmdInject(target ?? "all");
       break;
     case "ingest":
-      await cmdIngest();
+      console.log("[ingest] not implemented yet");
       break;
     case "help":
     case undefined:
@@ -113,4 +109,6 @@ async function main(): Promise<void> {
   }
 }
 
-await main();
+if (isMainModule(import.meta.url)) {
+  await main();
+}

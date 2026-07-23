@@ -7,9 +7,9 @@
     "brain": "./src/cli.ts"
   },
   "scripts": {
-    "brain": "bun src/cli.ts",
-    "start": "bun src/cli.ts",
-    "mcp": "bun src/mcp/server.ts"
+    "setup": "tsx src/setup.ts",
+    "brain": "tsx src/cli.ts",
+    "mcp": "tsx src/mcp/server.ts"
   },
   "devDependencies": {
     "@types/bun": "latest",
@@ -18,6 +18,11 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "glob": "^13.0.6",
+    "jsonc-parser": "^3.3.1",
+    "smol-toml": "^1.7.0",
+    "tsx": "^4.23.1",
+    "yaml": "^2.9.0",
     "zod": "^4.4.3"
   }
 }

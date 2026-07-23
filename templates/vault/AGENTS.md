@@ -5,7 +5,7 @@ This Obsidian vault is the source of truth for durable work memory.
 ## Scopes
 
 - **Project** = one **git repository** → `projects/<slug>/`
-- **Global** = cross-repo → `stack/`, `patterns/`, `media/`, `agents/`
+- **Global** = cross-repo → `stack/`, `patterns/`, `instructions/`, `workflows/`, `media/`, `agents/`
 - **When in doubt, ask** whether a fact belongs in global or project memory.
 
 ## Where to write
@@ -15,17 +15,24 @@ This Obsidian vault is the source of truth for durable work memory.
 | Quick capture / unsorted | `inbox/` |
 | User-dropped files (before ingest) | `external/` |
 | Git-repo context | `projects/<slug>/` |
+| Standing process rules | `instructions/global/<kind>.md` |
+| Multi-step playbooks | `workflows/global/<id>.md` |
+| Action → guidance map | `actions/registry.md` |
 | Cross-repo approaches | `patterns/` |
 | Tools & SaaS (any stack) | `stack/catalog/` + `stack/recent.md` |
 | Distilled talk takeaways | `media/` |
-| Agent/orchestrator playbooks | `agents/` |
+| Agent/orchestrator learnings | `agents/` |
 | Schema / indexes | `_meta/` |
+
+## Guidance first
+
+Before coding / PR review / commits / git process: resolve existing instruction/workflow (`resolve_guidance`). Follow hits; do not invent conflicting process.
 
 ## When to write
 
 - Durable decisions, preferences, gotchas, corrected misconceptions
 - Tools/SaaS you use or try (catalog + recent)
-- Patterns worth another session
+- Patterns and new/updated instructions & workflows
 
 ## When not to write
 

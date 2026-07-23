@@ -1,6 +1,13 @@
 import { mkdir } from "node:fs/promises";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { configDir } from "./config.ts";
+import {
+  copyFileEnsured,
+  globFiles,
+  pathExists,
+  readText,
+  writeText,
+} from "./runtime.ts";
 
 const NOTE_GLOBS = ["**/*.md", "**/*.txt"];
 const SKIP_DIR_PARTS = new Set([".obsidian", ".git", "node_modules", "_template"]);
@@ -96,12 +103,7 @@ export async function listNotePaths(vaultPath: string): Promise<string[]> {
   const paths: string[] = [];
 
   for (const pattern of NOTE_GLOBS) {
-    const glob = new Bun.Glob(pattern);
-    for await (const rel of glob.scan({
-      cwd: root,
-      onlyFiles: true,
-      dot: false,
-    })) {
+    for (const rel of await globFiles(root, pattern)) {
       const posix = toPosix(rel);
       if (shouldSkip(posix)) continue;
       paths.push(posix);
@@ -119,12 +121,11 @@ export async function readNote(
   const absolutePath = resolve(vaultPath, cleaned);
   assertInsideVault(vaultPath, absolutePath);
 
-  const file = Bun.file(absolutePath);
-  if (!(await file.exists())) {
+  if (!(await pathExists(absolutePath))) {
     throw new Error(`Note not found: ${cleaned}`);
   }
 
-  const body = await file.text();
+  const body = await readText(absolutePath);
   const title = extractTitle(stripFrontmatter(body), basename(cleaned));
   const plain = stripFrontmatter(body).replace(/\s+/g, " ").trim();
 
@@ -197,18 +198,16 @@ export async function ensureProject(
   const templateDir = projectTemplateDir();
   for (const name of PROJECT_FILES) {
     const dest = join(destDir, name);
-    const destFile = Bun.file(dest);
-    if (await destFile.exists()) continue;
+    if (await pathExists(dest)) continue;
 
     const src = join(templateDir, name);
-    const srcFile = Bun.file(src);
     let body: string;
-    if (await srcFile.exists()) {
-      body = (await srcFile.text()).replaceAll("{{PROJECT_SLUG}}", slug);
+    if (await pathExists(src)) {
+      body = (await readText(src)).replaceAll("{{PROJECT_SLUG}}", slug);
     } else {
       body = `# ${slug}\n`;
     }
-    await Bun.write(dest, body);
+    await writeText(dest, body);
     created.push(toPosix(join("projects", slug, name)));
   }
 
@@ -271,7 +270,7 @@ function parseRecentEntries(body: string): string[] {
 async function ensureRecentFile(vaultPath: string): Promise<string> {
   const abs = resolve(vaultPath, RECENT_PATH);
   assertInsideVault(vaultPath, abs);
-  if (!(await Bun.file(abs).exists())) {
+  if (!(await pathExists(abs))) {
     await mkdir(dirname(abs), { recursive: true });
     const template = resolve(
       configDir(),
@@ -280,10 +279,10 @@ async function ensureRecentFile(vaultPath: string): Promise<string> {
       "stack",
       "recent.md",
     );
-    if (await Bun.file(template).exists()) {
-      await Bun.write(abs, Bun.file(template));
+    if (await pathExists(template)) {
+      await copyFileEnsured(template, abs);
     } else {
-      await Bun.write(
+      await writeText(
         abs,
         "---\ntype: stack\ntags: [recent]\n---\n\n# Recent\n\n## Log\n\n",
       );
@@ -297,7 +296,7 @@ export async function prependRecent(
   entryLine: string,
 ): Promise<void> {
   const abs = await ensureRecentFile(vaultPath);
-  const body = await Bun.file(abs).text();
+  const body = await readText(abs);
   const date = new Date().toISOString().slice(0, 10);
   const line = entryLine.trim().startsWith("- ")
     ? entryLine.trim()
@@ -310,7 +309,7 @@ export async function prependRecent(
       ? `${body.trimEnd()}\n\n## Log\n\n`
       : body.slice(0, headerEnd) + "## Log\n\n";
 
-  await Bun.write(abs, `${header.trimEnd()}\n\n${entries.join("\n")}\n`);
+  await writeText(abs, `${header.trimEnd()}\n\n${entries.join("\n")}\n`);
 }
 
 export async function listRecent(
@@ -334,11 +333,10 @@ export async function trackTool(
   await mkdir(dirname(abs), { recursive: true });
 
   const tags = input.tags ?? [];
-  const existing = Bun.file(abs);
-  if (await existing.exists()) {
-    const prev = await existing.text();
+  if (await pathExists(abs)) {
+    const prev = await readText(abs);
     const appended = `${prev.trimEnd()}\n\n## Update ${date}\n\n${input.summary.trim()}\n`;
-    await Bun.write(abs, appended);
+    await writeText(abs, appended);
   } else {
     const body = [
       "---",
@@ -353,7 +351,7 @@ export async function trackTool(
       input.summary.trim(),
       "",
     ].join("\n");
-    await Bun.write(abs, body);
+    await writeText(abs, body);
   }
 
   await prependRecent(
@@ -365,12 +363,11 @@ export async function trackTool(
     const { slug: projectSlug } = await ensureProject(vaultPath, input.project);
     const toolsPath = toPosix(join("projects", projectSlug, "tools.md"));
     const toolsAbs = resolve(vaultPath, toolsPath);
-    const toolsFile = Bun.file(toolsAbs);
     const tip = `- ${date} · [[../../stack/catalog/${slug}|${input.name}]] — ${input.summary.trim().replace(/\s+/g, " ").slice(0, 100)}`;
-    if (await toolsFile.exists()) {
-      const prev = await toolsFile.text();
+    if (await pathExists(toolsAbs)) {
+      const prev = await readText(toolsAbs);
       if (!prev.toLowerCase().includes(slug.toLowerCase())) {
-        await Bun.write(toolsAbs, `${prev.trimEnd()}\n${tip}\n`);
+        await writeText(toolsAbs, `${prev.trimEnd()}\n${tip}\n`);
       }
     }
   }
@@ -418,11 +415,10 @@ export async function rememberNote(
     const absolutePath = resolve(vaultPath, relPath);
     assertInsideVault(vaultPath, absolutePath);
     await mkdir(dirname(absolutePath), { recursive: true });
-    const existing = Bun.file(absolutePath);
-    if (await existing.exists()) {
-      const prev = await existing.text();
+    if (await pathExists(absolutePath)) {
+      const prev = await readText(absolutePath);
       const block = `\n## ${input.title} (${date})\n\n${input.content.trim()}\n`;
-      await Bun.write(absolutePath, `${prev.trimEnd()}\n${block}`);
+      await writeText(absolutePath, `${prev.trimEnd()}\n${block}`);
       return readNote(vaultPath, relPath);
     }
   } else {
@@ -447,11 +443,10 @@ export async function rememberNote(
   assertInsideVault(vaultPath, absolutePath);
   await mkdir(dirname(absolutePath), { recursive: true });
 
-  const existing = Bun.file(absolutePath);
-  if (await existing.exists()) {
-    const prev = await existing.text();
+  if (await pathExists(absolutePath)) {
+    const prev = await readText(absolutePath);
     const appended = `${prev.trimEnd()}\n\n## Update ${date}\n\n${input.content.trim()}\n`;
-    await Bun.write(absolutePath, appended);
+    await writeText(absolutePath, appended);
     return readNote(vaultPath, relPath);
   }
 
@@ -472,8 +467,36 @@ export async function rememberNote(
     .filter((line) => line !== null)
     .join("\n");
 
-  await Bun.write(absolutePath, frontmatter);
+  await writeText(absolutePath, frontmatter);
   return readNote(vaultPath, relPath);
+}
+
+export async function vaultInfo(vaultPath: string): Promise<{
+  vaultPath: string;
+  readable: boolean;
+  agentsMd: boolean;
+  noteCount: number;
+  error?: string;
+}> {
+  try {
+    const agentsMd = await pathExists(join(vaultPath, "AGENTS.md"));
+    // Directory existence: try listing notes
+    const paths = await listNotePaths(vaultPath);
+    return {
+      vaultPath,
+      readable: agentsMd || paths.length > 0,
+      agentsMd,
+      noteCount: paths.length,
+    };
+  } catch (err) {
+    return {
+      vaultPath,
+      readable: false,
+      agentsMd: false,
+      noteCount: 0,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
 }
 
 export function noteToSummary(note: VaultNote, maxBody = 2000): string {
@@ -482,4 +505,354 @@ export function noteToSummary(note: VaultNote, maxBody = 2000): string {
       ? `${note.body.slice(0, maxBody)}\n\n…(truncated)`
       : note.body;
   return `path: ${note.path}\ntitle: ${note.title}\n\n${body}`;
+}
+
+export type GuidanceType = "instruction" | "workflow";
+
+export type GuidanceHit = {
+  path: string;
+  scope: "global" | "project";
+  type: GuidanceType;
+  kindOrId: string;
+  note: VaultNote;
+};
+
+export type ResolveGuidanceInput = {
+  intent?: string;
+  kind?: string;
+  workflow_id?: string;
+  project?: string;
+};
+
+export type UpsertGuidanceInput = {
+  type: GuidanceType;
+  content: string;
+  title?: string;
+  kind?: string;
+  workflow_id?: string;
+  scope: "global" | "project";
+  project?: string;
+  tags?: string[];
+};
+
+function guidancePaths(
+  type: GuidanceType,
+  kindOrId: string,
+  projectSlug?: string,
+): { project?: string; global: string } {
+  const file = `${slugify(kindOrId)}.md`;
+  if (type === "instruction") {
+    return {
+      project: projectSlug
+        ? toPosix(join("projects", slugify(projectSlug), "instructions", file))
+        : undefined,
+      global: toPosix(join("instructions", "global", file)),
+    };
+  }
+  return {
+    project: projectSlug
+      ? toPosix(join("projects", slugify(projectSlug), "workflows", file))
+      : undefined,
+    global: toPosix(join("workflows", "global", file)),
+  };
+}
+
+async function tryRead(
+  vaultPath: string,
+  relPath: string,
+): Promise<VaultNote | null> {
+  const abs = resolve(vaultPath, relPath);
+  if (!(await pathExists(abs))) return null;
+  return readNote(vaultPath, relPath);
+}
+
+function isGuidancePath(path: string): boolean {
+  return (
+    path.startsWith("instructions/") ||
+    path.startsWith("workflows/") ||
+    /\/instructions\//.test(path) ||
+    /\/workflows\//.test(path)
+  );
+}
+
+function kindFromPath(path: string): string {
+  return basename(path).replace(/\.md$/i, "");
+}
+
+export async function listGuidance(
+  vaultPath: string,
+  project?: string,
+): Promise<{
+  instructions: { scope: string; kind: string; path: string }[];
+  workflows: { scope: string; id: string; path: string }[];
+}> {
+  const paths = (await listNotePaths(vaultPath)).filter(isGuidancePath);
+  const instructions: { scope: string; kind: string; path: string }[] = [];
+  const workflows: { scope: string; id: string; path: string }[] = [];
+  const projectSlug = project ? slugify(project) : undefined;
+
+  for (const path of paths) {
+    if (path.endsWith("README.md") || path.endsWith("_index.md")) continue;
+    const kindOrId = kindFromPath(path);
+    if (path.includes("/instructions/") || path.startsWith("instructions/")) {
+      const scope = path.startsWith("projects/") ? "project" : "global";
+      if (
+        projectSlug &&
+        scope === "project" &&
+        !path.startsWith(`projects/${projectSlug}/`)
+      ) {
+        continue;
+      }
+      instructions.push({ scope, kind: kindOrId, path });
+    } else if (path.includes("/workflows/") || path.startsWith("workflows/")) {
+      const scope = path.startsWith("projects/") ? "project" : "global";
+      if (
+        projectSlug &&
+        scope === "project" &&
+        !path.startsWith(`projects/${projectSlug}/`)
+      ) {
+        continue;
+      }
+      workflows.push({ scope, id: kindOrId, path });
+    }
+  }
+
+  instructions.sort((a, b) => a.path.localeCompare(b.path));
+  workflows.sort((a, b) => a.path.localeCompare(b.path));
+  return { instructions, workflows };
+}
+
+export async function resolveGuidance(
+  vaultPath: string,
+  input: ResolveGuidanceInput,
+): Promise<{
+  hits: GuidanceHit[];
+  mode: "exact" | "search" | "none";
+  message: string;
+}> {
+  const projectSlug = input.project ? slugify(input.project) : undefined;
+  const hits: GuidanceHit[] = [];
+
+  const tryExact = async (
+    type: GuidanceType,
+    kindOrId: string,
+  ): Promise<void> => {
+    const paths = guidancePaths(type, kindOrId, projectSlug);
+    if (paths.project) {
+      const note = await tryRead(vaultPath, paths.project);
+      if (note) {
+        hits.push({
+          path: paths.project,
+          scope: "project",
+          type,
+          kindOrId: slugify(kindOrId),
+          note,
+        });
+      }
+    }
+    const globalNote = await tryRead(vaultPath, paths.global);
+    if (globalNote) {
+      hits.push({
+        path: paths.global,
+        scope: "global",
+        type,
+        kindOrId: slugify(kindOrId),
+        note: globalNote,
+      });
+    }
+  };
+
+  if (input.kind) {
+    await tryExact("instruction", input.kind);
+  }
+  if (input.workflow_id) {
+    await tryExact("workflow", input.workflow_id);
+  }
+
+  if (hits.length) {
+    return {
+      hits,
+      mode: "exact",
+      message:
+        "Apply project guidance over global when both are present. Do not invent conflicting process.",
+    };
+  }
+
+  // Intent / keyword fallback within guidance trees
+  const query =
+    input.intent?.trim() ||
+    [input.kind, input.workflow_id].filter(Boolean).join(" ");
+  if (!query) {
+    return {
+      hits: [],
+      mode: "none",
+      message:
+        "No guidance found. Ask the user whether to create an instruction/workflow and global vs project.",
+    };
+  }
+
+  // Synonym → kind shortcuts
+  const lower = query.toLowerCase();
+  const synonymKind =
+    /\b(pr|pull[- ]?request)[- ]?(review)?\b/.test(lower)
+      ? "pr-review"
+      : /\bcommit(\s+message)?s?\b/.test(lower)
+        ? "commit"
+        : /\bcod(e|ing)\b|\bimplement/.test(lower)
+          ? "coding"
+          : /\bgit\b|\bbranch/.test(lower)
+            ? "git"
+            : null;
+  if (synonymKind && !input.kind) {
+    await tryExact("instruction", synonymKind);
+    if (hits.length) {
+      return {
+        hits,
+        mode: "exact",
+        message:
+          "Matched via intent synonym. Apply project over global when both present.",
+      };
+    }
+  }
+
+  // OR-style search within guidance paths only
+  const terms = lower
+    .split(/\s+/)
+    .map((t) => t.trim())
+    .filter((t) => t.length > 2);
+  const paths = (await listNotePaths(vaultPath)).filter(isGuidancePath);
+  type Scored = { path: string; score: number };
+  const scored: Scored[] = [];
+  for (const path of paths) {
+    if (path.endsWith("README.md") || path.endsWith("_index.md")) continue;
+    if (
+      projectSlug &&
+      path.startsWith("projects/") &&
+      !path.startsWith(`projects/${projectSlug}/`)
+    ) {
+      continue;
+    }
+    const note = await readNote(vaultPath, path);
+    const hay = `${path}\n${note.title}\n${note.body}`.toLowerCase();
+    let score = 0;
+    for (const term of terms.length ? terms : [lower]) {
+      if (hay.includes(term)) score += 2;
+      if (note.title.toLowerCase().includes(term)) score += 3;
+      if (path.toLowerCase().includes(term)) score += 2;
+    }
+    if (score > 0) scored.push({ path, score });
+  }
+  scored.sort((a, b) => b.score - a.score);
+
+  for (const h of scored.slice(0, 8)) {
+    const note = await readNote(vaultPath, h.path);
+    const type: GuidanceType = h.path.includes("/workflows/") ||
+      h.path.startsWith("workflows/")
+      ? "workflow"
+      : "instruction";
+    hits.push({
+      path: h.path,
+      scope: h.path.startsWith("projects/") ? "project" : "global",
+      type,
+      kindOrId: kindFromPath(h.path),
+      note,
+    });
+  }
+
+  // Prefer project hits first
+  hits.sort((a, b) => {
+    if (a.scope !== b.scope) return a.scope === "project" ? -1 : 1;
+    return a.path.localeCompare(b.path);
+  });
+
+  if (!hits.length) {
+    return {
+      hits: [],
+      mode: "none",
+      message:
+        "No matching instruction/workflow. Tell the user none exists; ask before creating one (global vs project).",
+    };
+  }
+
+  return {
+    hits: hits.slice(0, 8),
+    mode: "search",
+    message:
+      "Search matches — prefer exact kind/id next time. Project over global when both apply.",
+  };
+}
+
+export async function upsertGuidance(
+  vaultPath: string,
+  input: UpsertGuidanceInput,
+): Promise<VaultNote> {
+  if (input.scope === "project" && !input.project) {
+    throw new Error("scope=project requires project (git repo slug)");
+  }
+  const kindOrId =
+    input.type === "workflow"
+      ? input.workflow_id ?? input.kind
+      : input.kind ?? input.workflow_id;
+  if (!kindOrId) {
+    throw new Error(
+      input.type === "workflow"
+        ? "workflow_id is required"
+        : "kind is required for instructions",
+    );
+  }
+
+  if (input.scope === "project" && input.project) {
+    await ensureProject(vaultPath, input.project);
+  }
+
+  const paths = guidancePaths(
+    input.type,
+    kindOrId,
+    input.scope === "project" ? input.project : undefined,
+  );
+  const relPath =
+    input.scope === "project" ? paths.project! : paths.global;
+  const abs = resolve(vaultPath, relPath);
+  assertInsideVault(vaultPath, abs);
+  await mkdir(dirname(abs), { recursive: true });
+
+  const date = new Date().toISOString().slice(0, 10);
+  const tags = input.tags ?? [];
+  const title =
+    input.title ??
+    (input.type === "workflow"
+      ? `Workflow: ${kindOrId}`
+      : `Instructions: ${kindOrId}`);
+
+  if (await pathExists(abs)) {
+    const prev = await readText(abs);
+    await writeText(
+      abs,
+      `${prev.trimEnd()}\n\n## Update ${date}\n\n${input.content.trim()}\n`,
+    );
+    return readNote(vaultPath, relPath);
+  }
+
+  const fm = [
+    "---",
+    `type: ${input.type}`,
+    input.type === "instruction"
+      ? `kind: ${slugify(kindOrId)}`
+      : `id: ${slugify(kindOrId)}`,
+    `scope: ${input.scope}`,
+    input.project ? `project: ${slugify(input.project)}` : null,
+    `tags: [${tags.map((t) => JSON.stringify(t)).join(", ")}]`,
+    `updated: ${date}`,
+    "---",
+    "",
+    `# ${title}`,
+    "",
+    input.content.trim(),
+    "",
+  ]
+    .filter((l) => l !== null)
+    .join("\n");
+
+  await writeText(abs, fm);
+  return readNote(vaultPath, relPath);
 }

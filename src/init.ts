@@ -1,6 +1,11 @@
 import { mkdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { configDir } from "./config.ts";
+import {
+  copyFileEnsured,
+  globFiles,
+  pathExists,
+} from "./runtime.ts";
 
 export type InitResult = {
   vaultPath: string;
@@ -12,17 +17,9 @@ function templatesRoot(): string {
   return resolve(configDir(), "templates", "vault");
 }
 
-async function* walkFiles(dir: string): AsyncGenerator<string> {
-  const glob = new Bun.Glob("**/*");
-  for await (const path of glob.scan({ cwd: dir, onlyFiles: true, dot: false })) {
-    yield path;
-  }
-}
-
 export async function initVault(vaultPath: string): Promise<InitResult> {
   const templateDir = templatesRoot();
-  const templateRoot = Bun.file(join(templateDir, "AGENTS.md"));
-  if (!(await templateRoot.exists())) {
+  if (!(await pathExists(join(templateDir, "AGENTS.md")))) {
     throw new Error(`Vault templates missing at ${templateDir}`);
   }
 
@@ -30,24 +27,23 @@ export async function initVault(vaultPath: string): Promise<InitResult> {
 
   const created: string[] = [];
   const skipped: string[] = [];
+  const files = await globFiles(templateDir, "**/*");
 
-  for await (const rel of walkFiles(templateDir)) {
+  for (const rel of files) {
     // Project pack templates are materialised via ensureProject, not copied as literals
-    if (rel.split("/").includes("_template")) {
+    if (rel.split("/").includes("_template") || rel.split("\\").includes("_template")) {
       continue;
     }
 
     const src = join(templateDir, rel);
     const dest = join(vaultPath, rel);
-    const destFile = Bun.file(dest);
 
-    if (await destFile.exists()) {
+    if (await pathExists(dest)) {
       skipped.push(rel);
       continue;
     }
 
-    await mkdir(resolve(dest, ".."), { recursive: true });
-    await Bun.write(dest, Bun.file(src));
+    await copyFileEnsured(src, dest);
     created.push(rel);
   }
 
@@ -61,6 +57,11 @@ export async function initVault(vaultPath: string): Promise<InitResult> {
     "stack/catalog",
     "media",
     "agents",
+    "instructions",
+    "instructions/global",
+    "workflows",
+    "workflows/global",
+    "actions",
     "_meta",
   ];
   for (const dir of dirs) {

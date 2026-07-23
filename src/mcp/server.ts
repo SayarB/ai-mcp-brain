@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 /**
  * Second-brain MCP server (stdio).
  * Logs go to stderr only — stdout is reserved for MCP JSON-RPC.
@@ -6,15 +6,20 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
+import { listActions, resolveAction } from "../actions.ts";
 import { loadConfig, resolveVaultPath } from "../config.ts";
 import {
   getProjectContext,
+  listGuidance,
   listRecent,
   noteToSummary,
   readNote,
   rememberNote,
+  resolveGuidance,
   searchNotes,
   trackTool,
+  upsertGuidance,
+  vaultInfo,
 } from "../vault.ts";
 
 function textResult(text: string) {
@@ -39,6 +44,24 @@ export function createBrainServer(): McpServer {
     name: "ai-mcp-brain",
     version: "0.2.0",
   });
+
+  server.registerTool(
+    "vault_info",
+    {
+      title: "Vault info",
+      description:
+        "Diagnostics: resolved vault path, whether it is readable, and note count. Use when vault access seems broken.",
+    },
+    async () => {
+      try {
+        const vault = await resolveVault();
+        const info = await vaultInfo(vault);
+        return textResult(JSON.stringify(info, null, 2));
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  );
 
   server.registerTool(
     "search_notes",
@@ -252,18 +275,217 @@ export function createBrainServer(): McpServer {
     },
   );
 
+  server.registerTool(
+    "resolve_guidance",
+    {
+      title: "Resolve guidance",
+      description:
+        "Look up standing instructions or workflows before inventing process. Pass kind (coding|pr-review|commit|git|…) and/or workflow_id and/or intent. Optional project git slug. Project overrides global.",
+      inputSchema: {
+        intent: z
+          .string()
+          .optional()
+          .describe("Free-text task (e.g. write a commit message)"),
+        kind: z
+          .string()
+          .optional()
+          .describe("Instruction kind: coding, pr-review, commit, git, …"),
+        workflow_id: z
+          .string()
+          .optional()
+          .describe("Workflow id under workflows/"),
+        project: z
+          .string()
+          .optional()
+          .describe("Git repo slug for project overrides"),
+      },
+    },
+    async (args) => {
+      try {
+        const vault = await resolveVault();
+        const result = await resolveGuidance(vault, args);
+        if (!result.hits.length) {
+          return textResult(`${result.mode}: ${result.message}`);
+        }
+        const body = result.hits
+          .map(
+            (h) =>
+              `### ${h.scope} ${h.type} (${h.kindOrId})\npath: ${h.path}\n\n${noteToSummary(h.note, 2500)}`,
+          )
+          .join("\n\n---\n\n");
+        return textResult(
+          `mode: ${result.mode}\n${result.message}\n\n${body}`,
+        );
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  );
+
+  server.registerTool(
+    "list_guidance",
+    {
+      title: "List guidance",
+      description:
+        "List instruction kinds and workflow ids in the vault (global + optional project).",
+      inputSchema: {
+        project: z
+          .string()
+          .optional()
+          .describe("If set, include that project's overrides"),
+      },
+    },
+    async ({ project }) => {
+      try {
+        const vault = await resolveVault();
+        const listed = await listGuidance(vault, project);
+        return textResult(JSON.stringify(listed, null, 2));
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  );
+
+  server.registerTool(
+    "upsert_guidance",
+    {
+      title: "Upsert guidance",
+      description:
+        "Create or append an instruction/workflow note. Ask global vs project if unclear. Prefer updating an existing kind/id over creating duplicates.",
+      inputSchema: {
+        type: z.enum(["instruction", "workflow"]),
+        content: z.string().min(1),
+        title: z.string().optional(),
+        kind: z
+          .string()
+          .optional()
+          .describe("Required for instruction (e.g. coding, commit)"),
+        workflow_id: z.string().optional().describe("Required for workflow"),
+        scope: z.enum(["global", "project"]),
+        project: z
+          .string()
+          .optional()
+          .describe("Git repo slug when scope=project"),
+        tags: z.array(z.string()).optional(),
+      },
+    },
+    async (args) => {
+      try {
+        const vault = await resolveVault();
+        const note = await upsertGuidance(vault, args);
+        return textResult(
+          `Wrote ${note.path}\n\n${noteToSummary(note, 800)}`,
+        );
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  );
+
+  server.registerTool(
+    "resolve_action",
+    {
+      title: "Resolve action",
+      description:
+        "PRIMARY entry for coding / PR review / commit / git process. Reads vault actions/registry.md, expands linked instructions/workflows (project over global). Prefer this over inventing process. Extend by editing the vault registry—no code change.",
+      inputSchema: {
+        action: z
+          .string()
+          .optional()
+          .describe("Action id: coding | pr-review | commit | git | custom"),
+        intent: z
+          .string()
+          .optional()
+          .describe("Free text if action id unknown"),
+        project: z.string().optional().describe("Git repo slug"),
+        pointers_only: z
+          .boolean()
+          .optional()
+          .describe("If true, return paths only (default false = expand markdown)"),
+      },
+    },
+    async (args) => {
+      try {
+        const vault = await resolveVault();
+        const result = await resolveAction(vault, args);
+        if (!result.actionId) {
+          return textResult(result.message);
+        }
+        const header = [
+          `action: ${result.actionId}`,
+          result.description ? `description: ${result.description}` : null,
+          `sources: ${result.sources.join(", ")}`,
+          `refs.instructions: ${result.refs.instructions.join(", ") || "(none)"}`,
+          `refs.workflows: ${result.refs.workflows.join(", ") || "(none)"}`,
+          result.message,
+        ]
+          .filter(Boolean)
+          .join("\n");
+
+        if (args.pointers_only) {
+          return textResult(
+            `${header}\n\npointers:\n${JSON.stringify(result.pointers, null, 2)}`,
+          );
+        }
+        return textResult(
+          `${header}\n\n${result.bundle || "(no note bodies)"}`,
+        );
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  );
+
+  server.registerTool(
+    "list_actions",
+    {
+      title: "List actions",
+      description:
+        "List action ids from vault actions/registry.md (plus project overlay if provided).",
+      inputSchema: {
+        project: z.string().optional().describe("Git repo slug for overlay"),
+      },
+    },
+    async ({ project }) => {
+      try {
+        const vault = await resolveVault();
+        const listed = await listActions(vault, project);
+        return textResult(JSON.stringify(listed, null, 2));
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  );
+
   return server;
 }
 
 async function main(): Promise<void> {
   const vault = await resolveVault();
+  const info = await vaultInfo(vault);
+  if (!info.readable) {
+    console.error(
+      `[ai-mcp-brain] WARNING: vault not readable at ${vault}` +
+        (info.error ? ` (${info.error})` : ""),
+    );
+    console.error(
+      "[ai-mcp-brain] Set BRAIN_VAULT or vault_path in config.toml; ensure Cursor has disk access to iCloud/Obsidian.",
+    );
+  } else {
+    console.error(
+      `[ai-mcp-brain] MCP server ready (vault: ${vault}, notes: ${info.noteCount})`,
+    );
+  }
   const server = createBrainServer();
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error(`[ai-mcp-brain] MCP server ready (vault: ${vault})`);
 }
 
-main().catch((err) => {
-  console.error("[ai-mcp-brain] fatal:", err);
-  process.exit(1);
-});
+import { isMainModule } from "../runtime.ts";
+
+if (isMainModule(import.meta.url)) {
+  main().catch((err) => {
+    console.error("[ai-mcp-brain] fatal:", err);
+    process.exit(1);
+  });
+}

@@ -1,37 +1,34 @@
 # ai-mcp-brain
 
-Scaffolding and MCP tools for a personal **second brain**: an Obsidian markdown vault that Cursor, Claude, and Codex can read and update.
+Portable second brain: Obsidian markdown vault + MCP for Cursor, Claude, Codex, and Zed.
 
-The vault lives outside this repo (default: your Obsidian iCloud “My Brain” folder). This project owns the CLI, prompts, rule injection, and MCP server.
+## Install (preferred): agent prompt
 
-## Quick start
+Paste [`INSTALL.md`](INSTALL.md) into any agent. It installs by copying `templates/vault/` and writing harness MCP/rules — **no OS-specific install scripts required**.
 
-```bash
-bun install
-cp config.example.toml config.toml   # edit vault_path / inject paths if needed
-bun run brain -- init                # create vault folders (idempotent)
-bun run brain -- inject --target all # rules + MCP into Cursor / Claude / Codex
-```
+You need a JS runtime so the MCP server can run: **Bun (preferred)** or **Node.js 20+** (MCP launches via local `tsx`). See [`INSTALL.md`](INSTALL.md).
 
-Restart the agent apps after inject so MCP and rules reload.
-
-Run the MCP server manually (usually spawned by the harness):
+## Optional setup shortcut
 
 ```bash
-bun run mcp
+bun install && bun run setup -- --vault "~/Obsidian/My Brain"
+# or
+npm install && npm run setup -- --vault "~/Obsidian/My Brain"
 ```
 
-Cursor example: see [`mcp.cursor.example.json`](mcp.cursor.example.json) (inject already merges into `~/.cursor/mcp.json`).
+Quote paths with spaces. Avoid iCloud/`Mobile Documents` if the editor sandbox returns `EPERM`.
 
-## CLI
+Then: open vault in Obsidian → restart editors → MCP `vault_info` → `readable: true`.
+
+## Runtime / CLI
 
 | Command | Purpose |
 |---------|---------|
-| `bun run brain -- init [--path <dir>]` | Create Obsidian vault structure |
-| `bun run brain -- inject [--target cursor\|claude\|codex\|all]` | Inject memory policy + wire MCP |
-| `bun run brain -- ingest` | *(planned)* Promote `external/` drops into notes |
+| `npm run mcp` / `bun run mcp` | MCP server |
+| `npm run setup` / `bun run setup` | Optional one-shot install |
+| `npm run brain -- …` | Optional advanced init/inject |
 
-Env: `BRAIN_VAULT` overrides `vault_path` from config.
+Inject prefers **Bun** for the MCP command when available; otherwise **Node + `tsx`**. Env: `BRAIN_VAULT` overrides vault path.
 
 ## Vault layout
 
@@ -61,11 +58,30 @@ My Brain/
 | `remember` | Write note (`scope`: `global` \| `project`) |
 | `get_project_context` | Ensure + load a git-repo project pack |
 | `list_recent` | Recent tools/skills |
-| `track_tool` | Upsert catalog + prepend recent |
+| `track_tool` | Catalog SaaS/tool + prepend recent |
+| `vault_info` | Diagnostics: path, readable?, note count |
+| `resolve_guidance` | Look up instructions/workflows before inventing process |
+| `list_guidance` | List instruction kinds and workflow ids |
+| `upsert_guidance` | Create/update instruction or workflow |
+| `resolve_action` | Action registry → expand linked guidance (primary for coding/PR/commit/git) |
+| `list_actions` | List action ids from `actions/registry.md` |
+
+### Instructions and workflows
+
+Standing process lives in the vault:
+
+- `actions/registry.md` — action trigger map (extend here; no repo change)
+- `instructions/global/<kind>.md` — coding, pr-review, commit, git (extensible)
+- `workflows/global/<id>.md` — multi-step playbooks
+- Project overrides: `projects/<slug>/instructions|workflows|actions/`
+
+Agents should call **`resolve_action`** at mode start (not every turn). Project precedes global. Empty instructions stay empty until you ask to fill them.
+
+After wiring MCP: **restart** editors and call `vault_info` → `readable: true`.
 
 ## Memory policy (short)
 
-- Read before inventing vault facts (`search` / `get_project_context`).
+- Read before inventing vault facts; **resolve_guidance** before inventing process.
 - Write durable decisions, preferences, gotchas, tools you use or try.
 - Do **not** write secrets or ephemeral debug.
 - Repo-only facts → `projects/<slug>/`. Tools/SaaS → `stack/catalog/` + `recent`.

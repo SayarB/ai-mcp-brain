@@ -1,10 +1,14 @@
 {
   "mcpServers": {
     "ai-mcp-brain": {
-      "command": "bun",
+      "command": "/Users/sayarbhattacharyya/.bun/bin/bun",
       "args": [
         "/Volumes/My Mac SSD 1/code/ai-mcp-brain/src/mcp/server.ts"
-      ]
+      ],
+      "cwd": "/Volumes/My Mac SSD 1/code/ai-mcp-brain",
+      "env": {
+        "BRAIN_VAULT": "/Users/sayarbhattacharyya/Obsidian/My Brain"
+      }
     }
   }
 }

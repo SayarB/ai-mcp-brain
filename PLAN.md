@@ -4,7 +4,7 @@
 
 - **Source of truth:** local Obsidian vault (markdown). You browse/edit in Obsidian; agents read/write via conventions + later MCP.
 - **Writers:** agents (Cursor / Claude / Codex) update memory when they judge it useful; you also drop files into an `external/` inbox and can edit any note by hand.
-- **This repo (`ai-mcp-brain`):** scaffolding scripts, prompts/rules templates, and injectors — not the vault itself. Vault path defaults to the Obsidian iCloud vault `…/Documents/My Brain` (override with `config.toml` or `BRAIN_VAULT`).
+- **This repo (`ai-mcp-brain`):** scaffolding scripts, prompts/rules templates, and injectors — not the vault itself. Vault path defaults to `~/Obsidian/My Brain` (override with `config.toml` or `BRAIN_VAULT`). Keep it **off iCloud** so Cursor MCP is not blocked by macOS EPERM.
 - **v1 scope:** structure + generate + inject rules. Agent “when to write” prompt craft and full MCP retrieval come next (discuss later).
 
 ## Architecture
@@ -109,9 +109,10 @@ Cursor example config: [`mcp.cursor.example.json`](mcp.cursor.example.json)
 2. Vault templates + `brain init` — **done** (My Brain iCloud path)
 3. MCP tools (search / read / remember / project context) — **done** (stdio)
 4. Rule templates + `brain inject` for Cursor, Claude, Codex — **done**
-5. Project scope + tool radar — **done** (git-repo projects, catalog/recent, ask-on-doubt, `list_recent` / `track_tool`)
-6. `brain ingest` for `external/`
-7. Short repo README: init → Obsidian → MCP → inject → daily use
+5. Project scope + tool radar — **done**
+6. Instruction + workflow library — **done**
+7. Action trigger registry (`resolve_action` / `list_actions`, vault-extensible) — **done**
+8. `brain ingest` for `external/`
 
 See also: [`plans/project-and-tools-memory.md`](plans/project-and-tools-memory.md)
 

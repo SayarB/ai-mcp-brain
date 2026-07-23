@@ -13,6 +13,12 @@ You have access to a durable second brain: an Obsidian markdown vault plus MCP t
 | `get_project_context` | Load/ensure notes for a **git repo** slug |
 | `list_recent` | Skim recently used/learned tools and skills |
 | `track_tool` | Upsert a tool/SaaS catalog note and prepend the recent log |
+| `resolve_guidance` | Look up instructions/workflows before inventing process |
+| `list_guidance` | Catalog instruction kinds and workflow ids |
+| `upsert_guidance` | Create/update an instruction or workflow note |
+| `resolve_action` | **Primary:** action registry → expand linked guidance |
+| `list_actions` | List action ids from `actions/registry.md` |
+| `vault_info` | Diagnostics: path, readable?, note count |
 
 If MCP is unavailable, you may read/write markdown under the vault path directly. Same policies apply.
 
@@ -41,6 +47,34 @@ Per-repo pack (auto-created by `get_project_context` / `remember` with `scope=pr
 - `decisions.md` — decisions for **this repo only**
 - `tools.md` — tools/SaaS used here
 - `gotchas.md` — optional pitfalls
+- `instructions/` — optional project overrides of global instruction kinds
+- `workflows/` — optional project playbooks
+
+---
+
+## Instructions and workflows
+
+| Artifact | Where |
+|----------|--------|
+| **Action registry** | `actions/registry.md` (project overlay: `projects/<slug>/actions/registry.md`) |
+| Global instructions | `instructions/global/<kind>.md` |
+| Project instructions | `projects/<slug>/instructions/<kind>.md` |
+| Global workflows | `workflows/global/<id>.md` |
+| Project workflows | `projects/<slug>/workflows/<id>.md` |
+
+Seeded actions: `coding`, `pr-review`, `commit`, `git`. New actions = vault registry edit only.
+
+**Before** coding / PR review / writing commits / git process work:
+
+1. Call **`resolve_action`** at **mode start** (not every turn): PR review, commit, git, non-trivial feature; also on mode switch / reload request.
+2. Prefer explicit `action` id; intent matching is fallback.
+3. Follow the bundle. **Project guidance precedes global.**
+4. Instruction files may be **empty** — that is OK. Do **not** invent or fill them unless the user explicitly asks to add process rules.
+5. Never invent conflicting process when guidance exists.
+
+`resolve_guidance` remains for direct kind/id lookup; prefer `resolve_action` for work modes.
+
+Project `actions/registry.md` merges with global: project instruction/workflow refs listed first, then global extras.
 
 ---
 
@@ -81,6 +115,7 @@ Before stating a preference, prior decision, or “we always do X” as fact: se
 - **Patterns** — only when cross-repo
 - **Agent/ops learnings** — orchestrator playbooks, failure modes
 - **Media distillations** — short takeaways from talks (not transcripts)
+- **Instructions / workflows / action registry** — **only when the user explicitly asks** to add or update process rules. Stubs start empty; do not fill them unprompted.
 
 Write **short, factual** notes. Prefer bullets and “do / don’t” over essays.
 

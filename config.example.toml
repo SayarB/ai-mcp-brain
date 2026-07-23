@@ -1,11 +1,8 @@
-# Copy to config.toml and adjust paths.
-# Env BRAIN_VAULT overrides vault_path when set.
+# Copy to config.toml via \`bun run setup\`, or copy manually.
+# Env BRAIN_VAULT overrides vault_path.
+# Prefer a non-cloud-synced path if your editor sandbox blocks iCloud/OneDrive.
 
-vault_path = "/Users/sayarbhattacharyya/Library/Mobile Documents/iCloud~md~obsidian/Documents/My Brain"
+vault_path = "~/Obsidian/My Brain"
 
-[inject]
-cursor_rules_dir = "~/.cursor/rules"
-cursor_mcp_file = "~/.cursor/mcp.json"
-claude_file = "~/.claude/CLAUDE.md"
-codex_file = "~/.codex/AGENTS.md"
-codex_config = "~/.codex/config.toml"
+# [inject] paths are optional — OS defaults are applied in code for
+# Cursor, Claude, Codex, and Zed (including Windows AppData for Zed).

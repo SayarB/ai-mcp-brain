@@ -1,5 +1,6 @@
 import { mkdir } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
+import { applyEdits, modify } from "jsonc-parser";
 import {
   configDir,
   expandHome,
@@ -7,8 +8,15 @@ import {
   resolveVaultPath,
   type BrainConfig,
 } from "./config.ts";
+import {
+  pathExists,
+  readText,
+  resolveMcpLaunch,
+  writeText,
+  type McpLaunch,
+} from "./runtime.ts";
 
-export type InjectTarget = "cursor" | "claude" | "codex" | "all";
+export type InjectTarget = "cursor" | "claude" | "codex" | "zed" | "all";
 
 export type InjectAction = {
   target: string;
@@ -26,9 +34,24 @@ function mcpServerScript(): string {
   return resolve(configDir(), "src", "mcp", "server.ts");
 }
 
+function mcpLaunchConfig(vaultPath: string): McpLaunch {
+  return resolveMcpLaunch(configDir(), mcpServerScript(), vaultPath);
+}
+
+function zedContextServerConfig(vaultPath: string): Record<string, unknown> {
+  const launch = mcpLaunchConfig(vaultPath);
+  // Zed docs: command + args + env (cwd not documented; BRAIN_VAULT is enough)
+  return {
+    enabled: true,
+    command: launch.command,
+    args: launch.args,
+    env: launch.env,
+  };
+}
+
 async function loadPolicy(vaultPath: string): Promise<string> {
   const policyPath = join(configDir(), "templates", "prompts", "memory-policy.md");
-  const raw = await Bun.file(policyPath).text();
+  const raw = await readText(policyPath);
   return raw
     .replaceAll("{{VAULT_PATH}}", vaultPath)
     .replaceAll("{{MCP_SERVER_PATH}}", mcpServerScript())
@@ -41,7 +64,7 @@ async function renderTemplate(
   policy: string,
 ): Promise<string> {
   const path = join(configDir(), "templates", relativeTemplate);
-  const raw = await Bun.file(path).text();
+  const raw = await readText(path);
   return raw.replaceAll("{{POLICY}}", policy).trimEnd() + "\n";
 }
 
@@ -66,17 +89,19 @@ function upsertMarkedBlock(
   return { next: `${base}\n\n${block.trim()}\n`, updated: false };
 }
 
-async function writeFileEnsured(path: string, contents: string): Promise<"wrote" | "updated"> {
-  const file = Bun.file(path);
-  const existed = await file.exists();
-  await mkdir(dirname(path), { recursive: true });
-  await Bun.write(path, contents);
+async function writeFileEnsured(
+  path: string,
+  contents: string,
+): Promise<"wrote" | "updated"> {
+  const existed = await pathExists(path);
+  await writeText(path, contents);
   return existed ? "updated" : "wrote";
 }
 
 async function injectCursorRules(
   config: BrainConfig,
   policy: string,
+  vaultPath: string,
 ): Promise<InjectAction[]> {
   const actions: InjectAction[] = [];
   const rulesDir = resolve(expandHome(config.inject.cursor_rules_dir));
@@ -86,17 +111,23 @@ async function injectCursorRules(
   actions.push({ target: "cursor-rules", path: rulePath, action });
 
   const mcpPath = resolve(expandHome(config.inject.cursor_mcp_file));
-  actions.push(await mergeCursorMcp(mcpPath));
+  actions.push(await mergeCursorMcp(mcpPath, vaultPath));
+
+  // Also write project-local MCP config (Cursor often prefers this in-repo)
+  const projectMcp = resolve(configDir(), ".cursor", "mcp.json");
+  actions.push(await mergeCursorMcp(projectMcp, vaultPath));
   return actions;
 }
 
-async function mergeCursorMcp(mcpPath: string): Promise<InjectAction> {
+async function mergeCursorMcp(
+  mcpPath: string,
+  vaultPath: string,
+): Promise<InjectAction> {
   await mkdir(dirname(mcpPath), { recursive: true });
-  const file = Bun.file(mcpPath);
   let root: { mcpServers?: Record<string, unknown> } = {};
-  if (await file.exists()) {
+  if (await pathExists(mcpPath)) {
     try {
-      root = JSON.parse(await file.text()) as typeof root;
+      root = JSON.parse(await readText(mcpPath)) as typeof root;
     } catch {
       throw new Error(`Invalid JSON in ${mcpPath}`);
     }
@@ -105,17 +136,20 @@ async function mergeCursorMcp(mcpPath: string): Promise<InjectAction> {
     root.mcpServers = {};
   }
 
+  const launch = mcpLaunchConfig(vaultPath);
   root.mcpServers["ai-mcp-brain"] = {
-    command: "bun",
-    args: [mcpServerScript()],
+    command: launch.command,
+    args: launch.args,
+    cwd: launch.cwd,
+    env: launch.env,
   };
 
-  await Bun.write(mcpPath, `${JSON.stringify(root, null, 2)}\n`);
+  await writeText(mcpPath, `${JSON.stringify(root, null, 2)}\n`);
   return {
     target: "cursor-mcp",
     path: mcpPath,
     action: "merged",
-    detail: "mcpServers.ai-mcp-brain",
+    detail: `mcpServers.ai-mcp-brain (+ cwd, BRAIN_VAULT, ${launch.runtime})`,
   };
 }
 
@@ -126,8 +160,7 @@ async function injectMarkedFile(
   policy: string,
 ): Promise<InjectAction> {
   const block = await renderTemplate(templateRel, policy);
-  const file = Bun.file(filePath);
-  const existing = (await file.exists()) ? await file.text() : "";
+  const existing = (await pathExists(filePath)) ? await readText(filePath) : "";
   const { next, updated } = upsertMarkedBlock(existing, block);
   const action = await writeFileEnsured(filePath, next);
   return {
@@ -137,15 +170,23 @@ async function injectMarkedFile(
   };
 }
 
-async function injectCodexMcp(configPath: string): Promise<InjectAction> {
+async function injectCodexMcp(
+  configPath: string,
+  vaultPath: string,
+): Promise<InjectAction> {
   await mkdir(dirname(configPath), { recursive: true });
-  const file = Bun.file(configPath);
-  const existing = (await file.exists()) ? await file.text() : "";
+  const existing = (await pathExists(configPath))
+    ? await readText(configPath)
+    : "";
+  const launch = mcpLaunchConfig(vaultPath);
   const block = [
     CODEX_MCP_START,
     "[mcp_servers.ai-mcp-brain]",
-    'command = "bun"',
-    `args = [${JSON.stringify(mcpServerScript())}]`,
+    `command = ${JSON.stringify(launch.command)}`,
+    `args = [${launch.args.map((a) => JSON.stringify(a)).join(", ")}]`,
+    `cwd = ${JSON.stringify(launch.cwd)}`,
+    "[mcp_servers.ai-mcp-brain.env]",
+    `BRAIN_VAULT = ${JSON.stringify(launch.env.BRAIN_VAULT)}`,
     CODEX_MCP_END,
   ].join("\n");
 
@@ -160,7 +201,77 @@ async function injectCodexMcp(configPath: string): Promise<InjectAction> {
     target: "codex-mcp",
     path: configPath,
     action: updated ? "updated" : action,
-    detail: "mcp_servers.ai-mcp-brain",
+    detail: `mcp_servers.ai-mcp-brain (+ cwd, BRAIN_VAULT, ${launch.runtime})`,
+  };
+}
+
+async function injectZed(
+  config: BrainConfig,
+  policy: string,
+  vaultPath: string,
+): Promise<InjectAction[]> {
+  const actions: InjectAction[] = [];
+  actions.push(
+    await injectMarkedFile(
+      "zed-agents",
+      resolve(expandHome(config.inject.zed_agents_file)),
+      "rules/zed/second-brain.block.md",
+      policy,
+    ),
+  );
+  actions.push(
+    await mergeZedSettings(
+      resolve(expandHome(config.inject.zed_settings_file)),
+      vaultPath,
+    ),
+  );
+  return actions;
+}
+
+async function mergeZedSettings(
+  settingsPath: string,
+  vaultPath: string,
+): Promise<InjectAction> {
+  await mkdir(dirname(settingsPath), { recursive: true });
+  const existing = (await pathExists(settingsPath))
+    ? await readText(settingsPath)
+    : "{\n}\n";
+
+  const server = zedContextServerConfig(vaultPath);
+  const formatting = { insertSpaces: true, tabSize: 4, eol: "\n" as const };
+
+  // Ensure context_servers object exists, then set ai-mcp-brain (preserves JSONC comments)
+  let next = existing;
+  const editsServer = modify(
+    next,
+    ["context_servers", "ai-mcp-brain"],
+    server,
+    { formattingOptions: formatting },
+  );
+  if (!editsServer.length) {
+    // Root may be empty / missing context_servers — seed then set
+    const seedEdits = modify(next, ["context_servers"], {}, {
+      formattingOptions: formatting,
+    });
+    next = applyEdits(next, seedEdits);
+    const retry = modify(
+      next,
+      ["context_servers", "ai-mcp-brain"],
+      server,
+      { formattingOptions: formatting },
+    );
+    next = applyEdits(next, retry);
+  } else {
+    next = applyEdits(next, editsServer);
+  }
+
+  if (!next.endsWith("\n")) next += "\n";
+  const action = await writeFileEnsured(settingsPath, next);
+  return {
+    target: "zed-mcp",
+    path: settingsPath,
+    action,
+    detail: "context_servers.ai-mcp-brain",
   };
 }
 
@@ -175,9 +286,10 @@ export async function injectHarnesses(
   const doCursor = target === "all" || target === "cursor";
   const doClaude = target === "all" || target === "claude";
   const doCodex = target === "all" || target === "codex";
+  const doZed = target === "all" || target === "zed";
 
   if (doCursor) {
-    actions.push(...(await injectCursorRules(config, policy)));
+    actions.push(...(await injectCursorRules(config, policy, vaultPath)));
   }
   if (doClaude) {
     actions.push(
@@ -199,8 +311,14 @@ export async function injectHarnesses(
       ),
     );
     actions.push(
-      await injectCodexMcp(resolve(expandHome(config.inject.codex_config))),
+      await injectCodexMcp(
+        resolve(expandHome(config.inject.codex_config)),
+        vaultPath,
+      ),
     );
+  }
+  if (doZed) {
+    actions.push(...(await injectZed(config, policy, vaultPath)));
   }
 
   return { vaultPath, actions };
@@ -219,7 +337,7 @@ export function formatInjectReport(
     lines.push(`[inject] ${a.action}: ${a.target} → ${a.path}${detail}`);
   }
   lines.push(
-    "[inject] restart Cursor / Claude / Codex sessions to pick up MCP + rules.",
+    "[inject] restart Cursor / Claude / Codex / Zed to pick up MCP + rules.",
   );
   return lines.join("\n");
 }
