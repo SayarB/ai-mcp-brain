@@ -1,0 +1,11 @@
+# Copy to config.toml and adjust paths.
+# Env BRAIN_VAULT overrides vault_path when set.
+
+vault_path = "/Users/sayarbhattacharyya/Library/Mobile Documents/iCloud~md~obsidian/Documents/My Brain"
+
+[inject]
+cursor_rules_dir = "~/.cursor/rules"
+cursor_mcp_file = "~/.cursor/mcp.json"
+claude_file = "~/.claude/CLAUDE.md"
+codex_file = "~/.codex/AGENTS.md"
+codex_config = "~/.codex/config.toml"

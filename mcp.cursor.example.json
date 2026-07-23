@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "ai-mcp-brain": {
+      "command": "bun",
+      "args": [
+        "/Volumes/My Mac SSD 1/code/ai-mcp-brain/src/mcp/server.ts"
+      ]
+    }
+  }
+}
