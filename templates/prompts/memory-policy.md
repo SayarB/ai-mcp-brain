@@ -16,20 +16,27 @@ Call **`resolve_action`** when **entering a mode** (PR review, commit, git ops, 
 
 - Prefer explicit `action` id; soft intent is fallback.
 - Follow returned guidance. **Project overrides / precedes global.**
-- Empty instruction bodies are normal — do **not** invent or fill process docs unless the user asks.
+- **Instructions** = binding. **Suggestions** = soft (prefer, not must).
+- Empty instruction bodies are normal — do **not** invent binding process.
 - Skip on same-mode follow-ups and tiny one-off edits.
 
 Miss → say so. Do not invent process.
 
-Extend in the vault only: `actions/registry.md` (+ instruction/workflow notes). Project overlay: `projects/<slug>/actions/registry.md` (merged; project refs first).
+Extend in the vault only: `actions/registry.md` (+ instruction/suggestion/workflow notes).
 
-## Empty until the user adds
+## Soft suggestions — auto-log (no magic words)
 
-Instruction/workflow notes start empty. **Only** create or fill them when the user explicitly asks (e.g. “remember this as my commit rules”, “add coding instructions”). Never seed process from vibes.
+When the user states a **standing** preference/default (signals: “prefer”, “try to”, “lean”, “when making/doing”, “from now on”, soft “always”), **same turn** call `upsert_guidance` with `type: suggestion`, matching kind (`coding`, `commit`, …). Confirm briefly after logging.
+
+Do **not** wait for “remember this” / “add to brain”.
+
+## Binding instructions — explicit only
+
+`instructions/` only when the user means hard process (“must”, “required”, “add as my coding rules”, “never skip”). Never seed instructions from vibes.
 
 ## Global vs project
 
-- Project pack / project instructions have **precedence** over global for the same kind/action.
+- Project pack / project guidance have **precedence** over global for the same kind/action.
 - Tool/SaaS → `stack/catalog/` + `recent`
 - **Unclear scope → ask** before writing.
 
@@ -39,12 +46,12 @@ Non-trivial work: `get_project_context` + search; process → `resolve_action` a
 
 ## Write when durable (non-process)
 
-Decisions, preferences, gotchas, tools, skills, corrections, patterns — when warranted. Process docs only on user request.
+Decisions, gotchas, tools, skills, corrections, patterns — when warranted. Soft prefs → suggestions (above). Binding process → instructions on explicit hard-rule ask only.
 
 ## Do not write
 
-Secrets, ephemeral debug, one-off chatter, unverified guesses; do not auto-fill empty instructions.
+Secrets, ephemeral debug, one-off chatter, unverified guesses; do not invent binding instructions.
 
 ## Folders
 
-`actions/` · `instructions/` · `workflows/` · `inbox/` · `external/` · `projects/<slug>/` · `patterns/` · `stack/` · `media/` · `agents/`
+`actions/` · `instructions/` · `suggestions/` · `workflows/` · `inbox/` · `external/` · `projects/<slug>/` · `patterns/` · `stack/` · `media/` · `agents/`

@@ -212,7 +212,7 @@ export type ResolveActionResult = {
   actionId: string | null;
   description?: string;
   sources: string[];
-  refs: { instructions: string[]; workflows: string[] };
+  refs: { instructions: string[]; suggestions: string[]; workflows: string[] };
   pointers: { scope: string; type: string; kindOrId: string; path: string }[];
   bundle: string;
   message: string;
@@ -229,7 +229,7 @@ export async function resolveAction(
     return {
       actionId: null,
       sources,
-      refs: { instructions: [], workflows: [] },
+      refs: { instructions: [], suggestions: [], workflows: [] },
       pointers: [],
       bundle: "",
       message:
@@ -237,8 +237,11 @@ export async function resolveAction(
     };
   }
 
+  const instructionKinds = matched.def.instructions ?? [];
   const refs = {
-    instructions: matched.def.instructions ?? [],
+    instructions: instructionKinds,
+    // v1: suggestions auto-pair with instruction kinds on the action
+    suggestions: instructionKinds,
     workflows: matched.def.workflows ?? [],
   };
   const pointers: ResolveActionResult["pointers"] = [];
@@ -248,12 +251,11 @@ export async function resolveAction(
     "",
   ];
 
-  for (const kind of refs.instructions) {
-    const resolved = await resolveGuidance(vaultPath, {
-      kind,
-      project: input.project,
-    });
-    for (const hit of resolved.hits) {
+  const pushHits = (
+    hits: Awaited<ReturnType<typeof resolveGuidance>>["hits"],
+    heading: (hit: (typeof hits)[number]) => string,
+  ) => {
+    for (const hit of hits) {
       pointers.push({
         scope: hit.scope,
         type: hit.type,
@@ -261,37 +263,56 @@ export async function resolveAction(
         path: hit.path,
       });
       if (!input.pointers_only) {
-        parts.push(
-          `## ${hit.scope} instruction \`${hit.kindOrId}\` (${hit.path})`,
-          "",
-          truncateNote(hit.note),
-          "",
-        );
+        parts.push(heading(hit), "", truncateNote(hit.note), "");
       }
     }
+  };
+
+  for (const kind of refs.instructions) {
+    const resolved = await resolveGuidance(vaultPath, {
+      kind,
+      type: "instruction",
+      project: input.project,
+    });
+    pushHits(
+      resolved.hits,
+      (hit) => `## ${hit.scope} instruction \`${hit.kindOrId}\` (${hit.path})`,
+    );
   }
+
+  const suggestionHits: Awaited<
+    ReturnType<typeof resolveGuidance>
+  >["hits"] = [];
+  for (const kind of refs.suggestions) {
+    const resolved = await resolveGuidance(vaultPath, {
+      kind,
+      type: "suggestion",
+      project: input.project,
+    });
+    suggestionHits.push(...resolved.hits);
+  }
+  if (suggestionHits.length && !input.pointers_only) {
+    parts.push(
+      "## Soft suggestions (prefer, not must)",
+      "",
+      "_Lean toward these defaults; bend when quality or structure requires it._",
+      "",
+    );
+  }
+  pushHits(
+    suggestionHits,
+    (hit) => `### ${hit.scope} suggestion \`${hit.kindOrId}\` (${hit.path})`,
+  );
 
   for (const workflowId of refs.workflows) {
     const resolved = await resolveGuidance(vaultPath, {
       workflow_id: workflowId,
       project: input.project,
     });
-    for (const hit of resolved.hits) {
-      pointers.push({
-        scope: hit.scope,
-        type: hit.type,
-        kindOrId: hit.kindOrId,
-        path: hit.path,
-      });
-      if (!input.pointers_only) {
-        parts.push(
-          `## ${hit.scope} workflow \`${hit.kindOrId}\` (${hit.path})`,
-          "",
-          truncateNote(hit.note),
-          "",
-        );
-      }
-    }
+    pushHits(
+      resolved.hits,
+      (hit) => `## ${hit.scope} workflow \`${hit.kindOrId}\` (${hit.path})`,
+    );
   }
 
   if (!pointers.length) {
@@ -303,7 +324,7 @@ export async function resolveAction(
       pointers,
       bundle: "",
       message:
-        "Action matched but no instruction/workflow notes found for its refs. Add the notes or fix registry paths.",
+        "Action matched but no instruction/suggestion/workflow notes found for its refs. Add the notes or fix registry paths.",
     };
   }
 
@@ -315,8 +336,8 @@ export async function resolveAction(
     pointers,
     bundle: input.pointers_only ? "" : parts.filter(Boolean).join("\n"),
     message: input.pointers_only
-      ? "Pointers only. Follow listed paths (project over global)."
-      : "Follow this guidance. Project sections override global when both appear. Do not invent conflicting process.",
+      ? "Pointers only. Follow listed paths (project over global). Instructions binding; suggestions soft."
+      : "Follow binding instructions. Prefer soft suggestions without treating them as must. Project overrides global. Do not invent conflicting process.",
   };
 }
 

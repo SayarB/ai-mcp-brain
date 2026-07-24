@@ -8,6 +8,8 @@ Paste [`INSTALL.md`](INSTALL.md) into any agent. It installs by copying `templat
 
 You need a JS runtime so the MCP server can run: **Bun (preferred)** or **Node.js 20+** (MCP launches via local `tsx`). See [`INSTALL.md`](INSTALL.md).
 
+**If you change how install works**, update `INSTALL.md` and the install scripts (`setup` / `init` / `inject` / `vault-layout` / examples) in the **same change** — see [Maintaining install](INSTALL.md#maintaining-install-contributors).
+
 ## Optional setup shortcut
 
 ```bash
@@ -37,6 +39,10 @@ My Brain/
   inbox/              # unsorted captures
   external/           # human file drops (ingest later)
   projects/<slug>/    # one git repo → README, decisions, tools, gotchas
+  instructions/       # binding process rules
+  suggestions/        # soft prefs (prefer / lean)
+  workflows/          # playbooks
+  actions/            # action → guidance registry
   patterns/           # cross-repo approaches
   stack/
     catalog/          # one note per tool/SaaS
@@ -60,29 +66,31 @@ My Brain/
 | `list_recent` | Recent tools/skills |
 | `track_tool` | Catalog SaaS/tool + prepend recent |
 | `vault_info` | Diagnostics: path, readable?, note count |
-| `resolve_guidance` | Look up instructions/workflows before inventing process |
-| `list_guidance` | List instruction kinds and workflow ids |
-| `upsert_guidance` | Create/update instruction or workflow |
-| `resolve_action` | Action registry → expand linked guidance (primary for coding/PR/commit/git) |
+| `resolve_guidance` | Look up instructions / soft suggestions / workflows |
+| `list_guidance` | List instruction kinds, suggestion kinds, workflow ids |
+| `upsert_guidance` | Create/update instruction, suggestion, or workflow |
+| `resolve_action` | Action registry → expand instructions + soft suggestions (+ workflows) |
 | `list_actions` | List action ids from `actions/registry.md` |
 
-### Instructions and workflows
+### Instructions, suggestions, and workflows
 
-Standing process lives in the vault:
+Standing guidance lives in the vault:
 
 - `actions/registry.md` — action trigger map (extend here; no repo change)
-- `instructions/global/<kind>.md` — coding, pr-review, commit, git (extensible)
+- `instructions/global/<kind>.md` — **binding** process (explicit hard rules only)
+- `suggestions/global/<kind>.md` — **soft** prefs (auto-logged standing defaults)
 - `workflows/global/<id>.md` — multi-step playbooks
-- Project overrides: `projects/<slug>/instructions|workflows|actions/`
+- Project overlays: `projects/<slug>/instructions|suggestions|workflows|actions/`
 
-Agents should call **`resolve_action`** at mode start (not every turn). Project precedes global. Empty instructions stay empty until you ask to fill them.
+Agents should call **`resolve_action`** at mode start (not every turn). Project precedes global. Soft suggestions = prefer, not must. Binding instructions stay empty until you mean hard rules.
 
 After wiring MCP: **restart** editors and call `vault_info` → `readable: true`.
 
 ## Memory policy (short)
 
-- Read before inventing vault facts; **resolve_guidance** before inventing process.
-- Write durable decisions, preferences, gotchas, tools you use or try.
+- Read before inventing vault facts; **resolve_action** / **resolve_guidance** before inventing process.
+- Soft standing prefs → `suggestions/` (auto-log). Binding process → `instructions/` only for hard rules.
+- Write durable decisions, gotchas, tools you use or try.
 - Do **not** write secrets or ephemeral debug.
 - Repo-only facts → `projects/<slug>/`. Tools/SaaS → `stack/catalog/` + `recent`.
 - **If global vs project is unclear, ask** before writing.

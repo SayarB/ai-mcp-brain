@@ -4,6 +4,8 @@ Paste everything under **Prompt** into any coding agent on macOS, Linux, or Wind
 
 No install shell scripts are required. Runtime: **Bun (preferred)** or **Node.js 20+** (via local `tsx`).
 
+**Maintainer rule:** any change that affects how this system is installed on a new device must update **this file** and the install path in code (`src/setup.ts`, `src/init.ts`, `src/inject.ts`, `src/runtime.ts`, `src/vault-layout.ts`, `package.json` scripts) in the **same change**. See [Maintaining install](#maintaining-install-contributors).
+
 ---
 
 ## Prompt
@@ -15,7 +17,7 @@ Install my second-brain from the `ai-mcp-brain` repo into a vault path I choose,
 1. Create an Obsidian-compatible markdown vault from `templates/vault/` (idempotent: do not overwrite existing notes).
 2. Point MCP at that vault via `BRAIN_VAULT`.
 3. Inject a short memory policy into Cursor / Claude / Codex / Zed **if those config locations exist**.
-4. Leave `instructions/global/*.md` bodies empty (titles/frontmatter only) unless I already filled them.
+4. Leave `instructions/global/*.md` bodies empty unless I mean binding process. Soft prefs go to `suggestions/`.
 5. Do not invent process/instruction content.
 
 ### Prerequisites
@@ -51,7 +53,18 @@ Copy everything under `templates/vault/` into the vault root:
 
 - Create missing directories and files.
 - **Never overwrite** a file that already exists.
-- Ensure dirs exist: `inbox`, `external`, `projects`, `patterns`, `stack/catalog`, `media`, `agents`, `instructions/global`, `workflows/global`, `actions`, `_meta`.
+- Ensure dirs exist (must match `REQUIRED_VAULT_DIRS` in `src/vault-layout.ts`):
+  `inbox`, `external`, `projects`, `patterns`, `stack`, `stack/catalog`, `media`, `agents`, `instructions`, `instructions/global`, `suggestions`, `suggestions/global`, `workflows`, `workflows/global`, `actions`, `_meta`.
+
+Prefer the scripted path when available:
+
+```bash
+npm run setup -- --vault "<vault-path>"
+# or
+bun run setup -- --vault "<vault-path>"
+```
+
+That runs vault init + harness inject and writes `config.toml`.
 
 #### C. Local config (optional but useful)
 
@@ -60,6 +73,8 @@ Write repo `config.toml` (gitignored) with:
 ```toml
 vault_path = "<absolute-or-~/vault-path>"
 ```
+
+See `config.example.toml`.
 
 #### D. MCP server entry (all harnesses)
 
@@ -80,15 +95,19 @@ Common for both:
 - cwd: `<repo>`
 - env: `{ "BRAIN_VAULT": "<absolute-vault-path>" }`
 
-(Or run `npm run setup` / `bun run setup`, which picks Bun vs Node automatically.)
+(Or run `npm run setup` / `bun run setup`, which picks Bun vs Node automatically via `resolveMcpLaunch` in `src/runtime.ts`.)
+
+Example shape: `mcp.cursor.example.json` (placeholders only — never commit machine-specific absolute paths as the canonical example).
 
 #### E. Wire harnesses (only if the path exists or can be created)
+
+Policy text comes from `templates/prompts/memory-policy.md` with `{{VAULT_PATH}}` (and other placeholders) replaced. Injected slim policy must mention: `resolve_action` mode-start, soft suggestions auto-log, binding instructions explicit-only.
 
 **Cursor**
 
 - Merge into `~/.cursor/mcp.json` under `mcpServers.ai-mcp-brain` (preserve other servers).
 - Also write `<repo>/.cursor/mcp.json` the same way (optional project config).
-- Write `~/.cursor/rules/second-brain.mdc` with frontmatter `alwaysApply: true` and the contents of `templates/prompts/memory-policy.md` after replacing `{{VAULT_PATH}}` with the absolute vault path (ignore other `{{…}}` placeholders or replace with repo path / MCP script path if present).
+- Write `~/.cursor/rules/second-brain.mdc` with frontmatter `alwaysApply: true` and the rendered memory-policy text.
 
 **Claude**
 
@@ -110,19 +129,25 @@ Skip any harness the user does not use.
 
 #### F. Verify
 
-- List vault top-level folders.
-- Confirm `actions/registry.md` and empty-ish `instructions/global/{coding,pr-review,commit,git}.md` exist.
+- List vault top-level folders (include `suggestions/`, `instructions/`, `actions/`, `workflows/`).
+- Confirm `actions/registry.md` exists.
+- Confirm empty-ish shells for kinds `coding`, `pr-review`, `commit`, `git` under both:
+  - `instructions/global/<kind>.md`
+  - `suggestions/global/<kind>.md`
+- Confirm MCP config uses absolute paths + `BRAIN_VAULT`.
 - Tell me to restart editors and run MCP tool `vault_info` → expect `readable: true`.
+- Optional: `resolve_action` with `action=coding` should return instructions + a soft-suggestions section (bodies may be empty on a fresh install).
 
 ### Policy reminders to leave in place
 
 - `resolve_action` on **mode start only** (not every turn).
 - Project guidance precedes global.
-- Do not fill empty instructions unless I explicitly ask.
+- Soft standing prefs → `upsert_guidance` `type=suggestion` (no magic words).
+- Do not fill binding instructions unless I explicitly ask for hard rules.
 
 ### Done criteria
 
-Report: vault path, which harnesses were wired, and that MCP uses `BRAIN_VAULT`.
+Report: vault path, which harnesses were wired, Bun vs Node MCP launch, and that MCP uses `BRAIN_VAULT`.
 
 ---
 
@@ -135,3 +160,23 @@ npm install && npm run setup -- --vault "~/Obsidian/My Brain"
 ```
 
 (Use quotes when the path has spaces.) Prefer the prompt steps above when setup scripts are unavailable or undesirable.
+
+---
+
+## Maintaining install (contributors)
+
+When you change **how install works** on a new machine, update **all** of the following in the same PR/change:
+
+| Surface | Role |
+|---------|------|
+| [`INSTALL.md`](INSTALL.md) (this file) | Agent/human install prompt — portable truth |
+| [`src/setup.ts`](src/setup.ts) | One-shot: config + init + inject |
+| [`src/init.ts`](src/init.ts) / [`src/vault-layout.ts`](src/vault-layout.ts) | Vault seed dirs + template copy |
+| [`src/inject.ts`](src/inject.ts) / [`src/runtime.ts`](src/runtime.ts) | Harness MCP launch (Bun or Node+tsx) |
+| [`templates/vault/`](templates/vault/) | What a fresh vault contains |
+| [`templates/prompts/memory-policy.md`](templates/prompts/memory-policy.md) | Injected slim policy |
+| [`package.json`](package.json) scripts | `setup` / `brain` / `mcp` entrypoints |
+| [`config.example.toml`](config.example.toml), [`mcp.cursor.example.json`](mcp.cursor.example.json) | Portable examples (placeholders) |
+| [`README.md`](README.md) install blurb | Points here |
+
+After install-path edits: reinject locally (`npm run brain -- inject --target all`) and sanity-check that a **clean** vault path + Node-only (or Bun-only) launch still matches this document.

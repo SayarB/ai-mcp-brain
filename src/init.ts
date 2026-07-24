@@ -6,6 +6,7 @@ import {
   globFiles,
   pathExists,
 } from "./runtime.ts";
+import { REQUIRED_VAULT_DIRS } from "./vault-layout.ts";
 
 export type InitResult = {
   vaultPath: string;
@@ -48,23 +49,7 @@ export async function initVault(vaultPath: string): Promise<InitResult> {
   }
 
   // Ensure empty-capable dirs exist even if a template file was skipped somehow
-  const dirs = [
-    "inbox",
-    "external",
-    "projects",
-    "patterns",
-    "stack",
-    "stack/catalog",
-    "media",
-    "agents",
-    "instructions",
-    "instructions/global",
-    "workflows",
-    "workflows/global",
-    "actions",
-    "_meta",
-  ];
-  for (const dir of dirs) {
+  for (const dir of REQUIRED_VAULT_DIRS) {
     await mkdir(join(vaultPath, dir), { recursive: true });
   }
 

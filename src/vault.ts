@@ -507,7 +507,7 @@ export function noteToSummary(note: VaultNote, maxBody = 2000): string {
   return `path: ${note.path}\ntitle: ${note.title}\n\n${body}`;
 }
 
-export type GuidanceType = "instruction" | "workflow";
+export type GuidanceType = "instruction" | "suggestion" | "workflow";
 
 export type GuidanceHit = {
   path: string;
@@ -521,6 +521,8 @@ export type ResolveGuidanceInput = {
   intent?: string;
   kind?: string;
   workflow_id?: string;
+  /** When set with kind, only that type; otherwise kind loads instruction + suggestion. */
+  type?: GuidanceType;
   project?: string;
 };
 
@@ -549,6 +551,14 @@ function guidancePaths(
       global: toPosix(join("instructions", "global", file)),
     };
   }
+  if (type === "suggestion") {
+    return {
+      project: projectSlug
+        ? toPosix(join("projects", slugify(projectSlug), "suggestions", file))
+        : undefined,
+      global: toPosix(join("suggestions", "global", file)),
+    };
+  }
   return {
     project: projectSlug
       ? toPosix(join("projects", slugify(projectSlug), "workflows", file))
@@ -569,8 +579,10 @@ async function tryRead(
 function isGuidancePath(path: string): boolean {
   return (
     path.startsWith("instructions/") ||
+    path.startsWith("suggestions/") ||
     path.startsWith("workflows/") ||
     /\/instructions\//.test(path) ||
+    /\/suggestions\//.test(path) ||
     /\/workflows\//.test(path)
   );
 }
@@ -579,47 +591,59 @@ function kindFromPath(path: string): string {
   return basename(path).replace(/\.md$/i, "");
 }
 
+function guidanceTypeFromPath(path: string): GuidanceType {
+  if (path.includes("/suggestions/") || path.startsWith("suggestions/")) {
+    return "suggestion";
+  }
+  if (path.includes("/workflows/") || path.startsWith("workflows/")) {
+    return "workflow";
+  }
+  return "instruction";
+}
+
+function scopeFromPath(path: string): "global" | "project" {
+  return path.startsWith("projects/") ? "project" : "global";
+}
+
 export async function listGuidance(
   vaultPath: string,
   project?: string,
 ): Promise<{
   instructions: { scope: string; kind: string; path: string }[];
+  suggestions: { scope: string; kind: string; path: string }[];
   workflows: { scope: string; id: string; path: string }[];
 }> {
   const paths = (await listNotePaths(vaultPath)).filter(isGuidancePath);
   const instructions: { scope: string; kind: string; path: string }[] = [];
+  const suggestions: { scope: string; kind: string; path: string }[] = [];
   const workflows: { scope: string; id: string; path: string }[] = [];
   const projectSlug = project ? slugify(project) : undefined;
 
   for (const path of paths) {
     if (path.endsWith("README.md") || path.endsWith("_index.md")) continue;
     const kindOrId = kindFromPath(path);
-    if (path.includes("/instructions/") || path.startsWith("instructions/")) {
-      const scope = path.startsWith("projects/") ? "project" : "global";
-      if (
-        projectSlug &&
-        scope === "project" &&
-        !path.startsWith(`projects/${projectSlug}/`)
-      ) {
-        continue;
-      }
+    const scope = scopeFromPath(path);
+    if (
+      projectSlug &&
+      scope === "project" &&
+      !path.startsWith(`projects/${projectSlug}/`)
+    ) {
+      continue;
+    }
+    const type = guidanceTypeFromPath(path);
+    if (type === "instruction") {
       instructions.push({ scope, kind: kindOrId, path });
-    } else if (path.includes("/workflows/") || path.startsWith("workflows/")) {
-      const scope = path.startsWith("projects/") ? "project" : "global";
-      if (
-        projectSlug &&
-        scope === "project" &&
-        !path.startsWith(`projects/${projectSlug}/`)
-      ) {
-        continue;
-      }
+    } else if (type === "suggestion") {
+      suggestions.push({ scope, kind: kindOrId, path });
+    } else {
       workflows.push({ scope, id: kindOrId, path });
     }
   }
 
   instructions.sort((a, b) => a.path.localeCompare(b.path));
+  suggestions.sort((a, b) => a.path.localeCompare(b.path));
   workflows.sort((a, b) => a.path.localeCompare(b.path));
-  return { instructions, workflows };
+  return { instructions, suggestions, workflows };
 }
 
 export async function resolveGuidance(
@@ -663,7 +687,16 @@ export async function resolveGuidance(
   };
 
   if (input.kind) {
-    await tryExact("instruction", input.kind);
+    if (input.type === "suggestion") {
+      await tryExact("suggestion", input.kind);
+    } else if (input.type === "instruction") {
+      await tryExact("instruction", input.kind);
+    } else if (input.type === "workflow") {
+      await tryExact("workflow", input.kind);
+    } else {
+      await tryExact("instruction", input.kind);
+      await tryExact("suggestion", input.kind);
+    }
   }
   if (input.workflow_id) {
     await tryExact("workflow", input.workflow_id);
@@ -674,7 +707,7 @@ export async function resolveGuidance(
       hits,
       mode: "exact",
       message:
-        "Apply project guidance over global when both are present. Do not invent conflicting process.",
+        "Apply project over global when both present. Instructions are binding; suggestions are soft (prefer, not must).",
     };
   }
 
@@ -687,7 +720,7 @@ export async function resolveGuidance(
       hits: [],
       mode: "none",
       message:
-        "No guidance found. Ask the user whether to create an instruction/workflow and global vs project.",
+        "No guidance found. Ask before creating binding instructions; soft prefs may use suggestions.",
     };
   }
 
@@ -705,12 +738,13 @@ export async function resolveGuidance(
             : null;
   if (synonymKind && !input.kind) {
     await tryExact("instruction", synonymKind);
+    await tryExact("suggestion", synonymKind);
     if (hits.length) {
       return {
         hits,
         mode: "exact",
         message:
-          "Matched via intent synonym. Apply project over global when both present.",
+          "Matched via intent synonym. Instructions binding; suggestions soft. Project over global.",
       };
     }
   }
@@ -746,22 +780,21 @@ export async function resolveGuidance(
 
   for (const h of scored.slice(0, 8)) {
     const note = await readNote(vaultPath, h.path);
-    const type: GuidanceType = h.path.includes("/workflows/") ||
-      h.path.startsWith("workflows/")
-      ? "workflow"
-      : "instruction";
     hits.push({
       path: h.path,
-      scope: h.path.startsWith("projects/") ? "project" : "global",
-      type,
+      scope: scopeFromPath(h.path),
+      type: guidanceTypeFromPath(h.path),
       kindOrId: kindFromPath(h.path),
       note,
     });
   }
 
-  // Prefer project hits first
+  // Prefer project hits first; instructions before suggestions before workflows
+  const typeRank = (t: GuidanceType) =>
+    t === "instruction" ? 0 : t === "suggestion" ? 1 : 2;
   hits.sort((a, b) => {
     if (a.scope !== b.scope) return a.scope === "project" ? -1 : 1;
+    if (a.type !== b.type) return typeRank(a.type) - typeRank(b.type);
     return a.path.localeCompare(b.path);
   });
 
@@ -770,7 +803,7 @@ export async function resolveGuidance(
       hits: [],
       mode: "none",
       message:
-        "No matching instruction/workflow. Tell the user none exists; ask before creating one (global vs project).",
+        "No matching instruction/suggestion/workflow. Tell the user none exists; ask before creating binding instructions.",
     };
   }
 
@@ -778,7 +811,7 @@ export async function resolveGuidance(
     hits: hits.slice(0, 8),
     mode: "search",
     message:
-      "Search matches — prefer exact kind/id next time. Project over global when both apply.",
+      "Search matches — prefer exact kind/id next time. Instructions binding; suggestions soft.",
   };
 }
 
@@ -797,7 +830,7 @@ export async function upsertGuidance(
     throw new Error(
       input.type === "workflow"
         ? "workflow_id is required"
-        : "kind is required for instructions",
+        : "kind is required for instructions/suggestions",
     );
   }
 
@@ -822,7 +855,9 @@ export async function upsertGuidance(
     input.title ??
     (input.type === "workflow"
       ? `Workflow: ${kindOrId}`
-      : `Instructions: ${kindOrId}`);
+      : input.type === "suggestion"
+        ? `Suggestions: ${kindOrId}`
+        : `Instructions: ${kindOrId}`);
 
   if (await pathExists(abs)) {
     const prev = await readText(abs);
@@ -836,9 +871,10 @@ export async function upsertGuidance(
   const fm = [
     "---",
     `type: ${input.type}`,
-    input.type === "instruction"
-      ? `kind: ${slugify(kindOrId)}`
-      : `id: ${slugify(kindOrId)}`,
+    input.type === "workflow"
+      ? `id: ${slugify(kindOrId)}`
+      : `kind: ${slugify(kindOrId)}`,
+    input.type === "suggestion" ? "weight: soft" : null,
     `scope: ${input.scope}`,
     input.project ? `project: ${slugify(input.project)}` : null,
     `tags: [${tags.map((t) => JSON.stringify(t)).join(", ")}]`,

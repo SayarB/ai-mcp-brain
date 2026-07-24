@@ -13,9 +13,9 @@ You have access to a durable second brain: an Obsidian markdown vault plus MCP t
 | `get_project_context` | Load/ensure notes for a **git repo** slug |
 | `list_recent` | Skim recently used/learned tools and skills |
 | `track_tool` | Upsert a tool/SaaS catalog note and prepend the recent log |
-| `resolve_guidance` | Look up instructions/workflows before inventing process |
-| `list_guidance` | Catalog instruction kinds and workflow ids |
-| `upsert_guidance` | Create/update an instruction or workflow note |
+| `resolve_guidance` | Look up instructions / soft suggestions / workflows before inventing process |
+| `list_guidance` | Catalog instruction kinds, suggestion kinds, and workflow ids |
+| `upsert_guidance` | Create/update instruction, suggestion, or workflow note |
 | `resolve_action` | **Primary:** action registry → expand linked guidance |
 | `list_actions` | List action ids from `actions/registry.md` |
 | `vault_info` | Diagnostics: path, readable?, note count |
@@ -48,28 +48,31 @@ Per-repo pack (auto-created by `get_project_context` / `remember` with `scope=pr
 - `tools.md` — tools/SaaS used here
 - `gotchas.md` — optional pitfalls
 - `instructions/` — optional project overrides of global instruction kinds
+- `suggestions/` — optional project soft preferences
 - `workflows/` — optional project playbooks
 
 ---
 
-## Instructions and workflows
+## Instructions, suggestions, and workflows
 
-| Artifact | Where |
-|----------|--------|
-| **Action registry** | `actions/registry.md` (project overlay: `projects/<slug>/actions/registry.md`) |
-| Global instructions | `instructions/global/<kind>.md` |
-| Project instructions | `projects/<slug>/instructions/<kind>.md` |
-| Global workflows | `workflows/global/<id>.md` |
-| Project workflows | `projects/<slug>/workflows/<id>.md` |
+| Artifact | Where | Authority |
+|----------|--------|-----------|
+| **Action registry** | `actions/registry.md` (project overlay: `projects/<slug>/actions/registry.md`) | maps actions → kinds |
+| Global instructions | `instructions/global/<kind>.md` | **binding** |
+| Project instructions | `projects/<slug>/instructions/<kind>.md` | **binding** (precedes global) |
+| Global suggestions | `suggestions/global/<kind>.md` | **soft** (prefer / lean) |
+| Project suggestions | `projects/<slug>/suggestions/<kind>.md` | **soft** (precedes global) |
+| Global workflows | `workflows/global/<id>.md` | playbooks |
+| Project workflows | `projects/<slug>/workflows/<id>.md` | playbooks |
 
-Seeded actions: `coding`, `pr-review`, `commit`, `git`. New actions = vault registry edit only.
+Seeded actions: `coding`, `pr-review`, `commit`, `git`. New actions = vault registry edit only. Suggestion kinds **auto-pair** with instruction kinds on the action.
 
 **Before** coding / PR review / writing commits / git process work:
 
 1. Call **`resolve_action`** at **mode start** (not every turn): PR review, commit, git, non-trivial feature; also on mode switch / reload request.
 2. Prefer explicit `action` id; intent matching is fallback.
-3. Follow the bundle. **Project guidance precedes global.**
-4. Instruction files may be **empty** — that is OK. Do **not** invent or fill them unless the user explicitly asks to add process rules.
+3. Follow the bundle. **Project guidance precedes global.** Instructions are binding; suggestions are soft.
+4. Instruction files may be **empty** — that is OK. Do **not** invent binding process unless the user explicitly asks for hard rules.
 5. Never invent conflicting process when guidance exists.
 
 `resolve_guidance` remains for direct kind/id lookup; prefer `resolve_action` for work modes.
@@ -106,8 +109,8 @@ Before stating a preference, prior decision, or “we always do X” as fact: se
 
 ## When you SHOULD write
 
+- **Soft suggestions** — user standing prefs/defaults (“prefer”, “try to”, “when making…”) → `upsert_guidance` `type: suggestion` **same turn**; no “remember this” required. Confirm briefly after logging.
 - **Decisions** — chosen approach and why (project vs global per routing above)
-- **Preferences** — user-stated defaults
 - **Gotchas** — bugs and quirks worth the next session
 - **Tools / SaaS** — anything you use or try → `track_tool` (catalog + recent)
 - **Skills learned** — also prepend recent when it is a real skill/tool takeaway
@@ -115,7 +118,7 @@ Before stating a preference, prior decision, or “we always do X” as fact: se
 - **Patterns** — only when cross-repo
 - **Agent/ops learnings** — orchestrator playbooks, failure modes
 - **Media distillations** — short takeaways from talks (not transcripts)
-- **Instructions / workflows / action registry** — **only when the user explicitly asks** to add or update process rules. Stubs start empty; do not fill them unprompted.
+- **Binding instructions / workflows / action registry** — **only** when the user means hard process (“must”, “required”, “add as my coding rules”). Soft prefs go to suggestions, not instructions.
 
 Write **short, factual** notes. Prefer bullets and “do / don’t” over essays.
 
@@ -155,6 +158,7 @@ When a SaaS/product/tool is seriously used or discussed:
 ```
 start  → get_project_context + search (+ list_recent if useful)
 work   → implement; keep secrets out of notes
+prefer → standing soft pref stated → upsert_guidance type=suggestion same turn
 learn  → remember / track_tool; ask if scope unclear
 end    → optional inbox capture of open threads worth keeping
 ```

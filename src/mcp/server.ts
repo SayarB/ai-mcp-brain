@@ -280,7 +280,7 @@ export function createBrainServer(): McpServer {
     {
       title: "Resolve guidance",
       description:
-        "Look up standing instructions or workflows before inventing process. Pass kind (coding|pr-review|commit|git|…) and/or workflow_id and/or intent. Optional project git slug. Project overrides global.",
+        "Look up standing instructions, soft suggestions, or workflows before inventing process. Pass kind (coding|pr-review|commit|git|…) and/or workflow_id and/or intent. Optional type filter. Optional project git slug. Project overrides global.",
       inputSchema: {
         intent: z
           .string()
@@ -289,11 +289,19 @@ export function createBrainServer(): McpServer {
         kind: z
           .string()
           .optional()
-          .describe("Instruction kind: coding, pr-review, commit, git, …"),
+          .describe(
+            "Kind for instruction/suggestion: coding, pr-review, commit, git, …",
+          ),
         workflow_id: z
           .string()
           .optional()
           .describe("Workflow id under workflows/"),
+        type: z
+          .enum(["instruction", "suggestion", "workflow"])
+          .optional()
+          .describe(
+            "Optional filter. If omitted with kind, loads instruction + suggestion.",
+          ),
         project: z
           .string()
           .optional()
@@ -327,7 +335,7 @@ export function createBrainServer(): McpServer {
     {
       title: "List guidance",
       description:
-        "List instruction kinds and workflow ids in the vault (global + optional project).",
+        "List instruction kinds, suggestion kinds, and workflow ids in the vault (global + optional project).",
       inputSchema: {
         project: z
           .string()
@@ -351,15 +359,15 @@ export function createBrainServer(): McpServer {
     {
       title: "Upsert guidance",
       description:
-        "Create or append an instruction/workflow note. Ask global vs project if unclear. Prefer updating an existing kind/id over creating duplicates.",
+        "Create or append an instruction, soft suggestion, or workflow note. Soft standing prefs → type=suggestion (no magic words). Binding process → type=instruction only when user means hard rules. Ask global vs project if unclear.",
       inputSchema: {
-        type: z.enum(["instruction", "workflow"]),
+        type: z.enum(["instruction", "suggestion", "workflow"]),
         content: z.string().min(1),
         title: z.string().optional(),
         kind: z
           .string()
           .optional()
-          .describe("Required for instruction (e.g. coding, commit)"),
+          .describe("Required for instruction/suggestion (e.g. coding, commit)"),
         workflow_id: z.string().optional().describe("Required for workflow"),
         scope: z.enum(["global", "project"]),
         project: z

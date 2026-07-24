@@ -1,13 +1,14 @@
 {
   "mcpServers": {
     "ai-mcp-brain": {
-      "command": "/Users/sayarbhattacharyya/.bun/bin/bun",
+      "command": "<absolute-path-to-bun-OR-node>",
       "args": [
-        "/Volumes/My Mac SSD 1/code/ai-mcp-brain/src/mcp/server.ts"
+        "<if-node: absolute-path-to-repo/node_modules/tsx/dist/cli.mjs>",
+        "<absolute-path-to-repo>/src/mcp/server.ts"
       ],
-      "cwd": "/Volumes/My Mac SSD 1/code/ai-mcp-brain",
+      "cwd": "<absolute-path-to-repo>",
       "env": {
-        "BRAIN_VAULT": "/Users/sayarbhattacharyya/Obsidian/My Brain"
+        "BRAIN_VAULT": "<absolute-vault-path>"
       }
     }
   }

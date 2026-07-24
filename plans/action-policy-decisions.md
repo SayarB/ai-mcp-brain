@@ -8,4 +8,5 @@ Agreed in discussion (2026-07-24):
 2. **Prefer explicit `action` id**; soft intent matching as fallback.
 3. **No new actions yet** beyond coding / pr-review / commit / git (extend via vault registry later).
 4. **Project overlay merges with precedence:** project instruction/workflow refs first, then global extras not already listed. Expanded notes still list project bodies before global for the same kind.
-5. **Instructions start empty.** Agents must not invent or fill coding/PR/commit/git (or workflow) docs unless the user explicitly prompts to add them.
+5. **Instructions start empty / stay binding-only.** Agents must not invent or fill coding/PR/commit/git (or workflow) docs unless the user explicitly means hard process rules.
+6. **Soft suggestions layer (2026-07-24):** standing prefs (“prefer / try to / when making…”) auto-log to `suggestions/` via `upsert_guidance` `type=suggestion` same turn — no “remember this” required. `resolve_action` surfaces them under a soft section (prefer, not must). Suggestion kinds auto-pair with instruction kinds on the action.

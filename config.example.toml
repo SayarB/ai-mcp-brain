@@ -1,4 +1,4 @@
-# Copy to config.toml via \`bun run setup\`, or copy manually.
+# Copy to config.toml via `npm run setup` / `bun run setup`, or copy manually.
 # Env BRAIN_VAULT overrides vault_path.
 # Prefer a non-cloud-synced path if your editor sandbox blocks iCloud/OneDrive.
 

@@ -5,7 +5,7 @@ This Obsidian vault is the source of truth for durable work memory.
 ## Scopes
 
 - **Project** = one **git repository** → `projects/<slug>/`
-- **Global** = cross-repo → `stack/`, `patterns/`, `instructions/`, `workflows/`, `media/`, `agents/`
+- **Global** = cross-repo → `stack/`, `patterns/`, `instructions/`, `suggestions/`, `workflows/`, `media/`, `agents/`
 - **When in doubt, ask** whether a fact belongs in global or project memory.
 
 ## Where to write
@@ -15,7 +15,8 @@ This Obsidian vault is the source of truth for durable work memory.
 | Quick capture / unsorted | `inbox/` |
 | User-dropped files (before ingest) | `external/` |
 | Git-repo context | `projects/<slug>/` |
-| Standing process rules | `instructions/global/<kind>.md` |
+| Binding process rules | `instructions/global/<kind>.md` |
+| Soft preferences (prefer / lean) | `suggestions/global/<kind>.md` |
 | Multi-step playbooks | `workflows/global/<id>.md` |
 | Action → guidance map | `actions/registry.md` |
 | Cross-repo approaches | `patterns/` |
@@ -26,13 +27,15 @@ This Obsidian vault is the source of truth for durable work memory.
 
 ## Guidance first
 
-Before coding / PR review / commits / git process: resolve existing instruction/workflow (`resolve_guidance`). Follow hits; do not invent conflicting process.
+Before coding / PR review / commits / git process: resolve via `resolve_action` (instructions + soft suggestions). Follow binding instructions; prefer suggestions without treating them as must.
 
 ## When to write
 
-- Durable decisions, preferences, gotchas, corrected misconceptions
+- Soft standing prefs → `suggestions/` (auto-log; no “remember this” required)
+- Binding process → `instructions/` only when the user means hard rules
+- Durable decisions, gotchas, corrected misconceptions
 - Tools/SaaS you use or try (catalog + recent)
-- Patterns and new/updated instructions & workflows
+- Patterns and workflows when asked
 
 ## When not to write
 

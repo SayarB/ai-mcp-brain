@@ -76,7 +76,7 @@ Next:
   1. Open the vault folder in Obsidian (optional but recommended)
   2. Restart Cursor / Claude / Codex / Zed so MCP reloads
   3. Call MCP tool vault_info — expect readable: true
-  4. Fill empty instructions under instructions/global/ when ready
+  4. Soft prefs auto-log to suggestions/; binding rules go in instructions/ only when you mean hard process
 `);
 }
 
