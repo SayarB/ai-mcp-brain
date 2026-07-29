@@ -82,7 +82,7 @@ Project `actions/registry.md` merges with global: project instruction/workflow r
 
 ### Orchesto (project skill)
 
-Personas (`persona-architect` / `persona-implementor` / `persona-reviewer`) live under `workflows/global/` (optional project overlays). They are **not** actions. The pipeline is a **project** Cursor skill (`.cursor/skills/orchesto/`) installed via **setup orchesto** — see `templates/skills/orchesto/README.md`. Do not add an `orchesto` action or vault orchesto workflow.
+Personas (`persona-architect` / `persona-implementor` / `persona-reviewer`) live under `workflows/global/` (optional project overlays). They are **not** actions. Setup playbook: `workflows/global/setup-orchesto.md`. The pipeline is a **project** Cursor skill installed via that playbook. Do not add an `orchesto` action.
 
 ---
 

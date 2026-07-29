@@ -40,7 +40,7 @@ When the user asks to **plan** something: write/update a markdown file under **`
 
 ## Setup orchesto
 
-When the user asks to **setup orchesto** in a git repo: follow **`templates/skills/orchesto/README.md`** in the ai-mcp-brain repo (ensure vault personas from templates if missing; copy skill → **project** `.cursor/skills/orchesto/SKILL.md` only — never global `~/.cursor/skills`; ask before overwriting an edited skill; ensure `.plans/` + gitignore). Personas stay in the vault; the skill is procedure only.
+When the user asks to **setup orchesto**: call MCP `read_note` on `workflows/global/setup-orchesto.md` and follow it. **Do not web-search.** Orchesto ≠ Orca/orca-cli.
 
 ## Binding instructions — explicit only
 

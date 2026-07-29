@@ -144,7 +144,7 @@ Skip any harness the user does not use.
 - Project guidance precedes global.
 - Soft standing prefs → `upsert_guidance` `type=suggestion` (no magic words).
 - Do not fill binding instructions unless I explicitly ask for hard rules.
-- When asked to **setup orchesto**: follow `templates/skills/orchesto/README.md` (project skill only, vault personas, `.plans/` + gitignore).
+- When asked to **setup orchesto**: `read_note` `workflows/global/setup-orchesto.md` (do not web-search; Orchesto ≠ Orca).
 
 ### Done criteria
 
@@ -154,16 +154,9 @@ Report: vault path, which harnesses were wired, Bun vs Node MCP launch, and that
 
 ## Setup orchesto (any product repo)
 
-After the second brain is installed, in **any** git repo the user can say **setup orchesto**. The agent should:
+After the second brain is installed, in **any** git repo the user can say **setup orchesto**. The agent should **`read_note` `workflows/global/setup-orchesto.md`** in the vault and follow it (personas + project skill + `.plans/`). Source templates also live under `templates/vault/workflows/global/` in this repo for vault init.
 
-1. Confirm MCP `vault_info` is readable.
-2. Ensure vault has persona notes (copy from this repo’s `templates/vault/workflows/global/persona-*.md` into the vault **only if missing** — never overwrite):
-   - `persona-architect.md`, `persona-implementor.md`, `persona-reviewer.md`
-3. Copy `templates/skills/orchesto/SKILL.md` → `<that-repo>/.cursor/skills/orchesto/SKILL.md` (project skill only — **not** `~/.cursor/skills`). Ask before overwriting an existing diverged skill.
-4. Ensure `<that-repo>/.plans/` exists and `.plans/` is in that repo’s `.gitignore`.
-5. Report skill + persona paths.
-
-Full detail: [`templates/skills/orchesto/README.md`](templates/skills/orchesto/README.md).
+Canonical skill text for contributors: [`templates/skills/orchesto/`](templates/skills/orchesto/) (kept in sync with vault `orchesto-skill-template.md`).
 
 ---
 
