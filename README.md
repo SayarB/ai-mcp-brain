@@ -8,7 +8,11 @@ Paste [`INSTALL.md`](INSTALL.md) into any agent. It installs by copying `templat
 
 You need a JS runtime so the MCP server can run: **Bun (preferred)** or **Node.js 20+** (MCP launches via local `tsx`). See [`INSTALL.md`](INSTALL.md).
 
-**If you change how install works**, update `INSTALL.md` and the install scripts (`setup` / `init` / `inject` / `vault-layout` / examples) in the **same change** — see [Maintaining install](INSTALL.md#maintaining-install-contributors).
+**If you change how install works**, update `INSTALL.md` and the install scripts (`setup` / `init` / `inject` / `vault-layout` / examples) in the **same change** — see [Maintaining install](INSTALL.md#maintaining-install-contributors). Keep [`UNINSTALL.md`](UNINSTALL.md) aligned with the same harness paths.
+
+## Uninstall
+
+Paste [`UNINSTALL.md`](UNINSTALL.md) into any agent (or follow its checklist). Removes MCP + injected policy from harnesses; **keeps the vault** unless you explicitly ask to delete it.
 
 ## Optional setup shortcut
 

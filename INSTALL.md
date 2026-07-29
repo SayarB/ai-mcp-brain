@@ -179,6 +179,7 @@ When you change **how install works** on a new machine, update **all** of the fo
 | Surface | Role |
 |---------|------|
 | [`INSTALL.md`](INSTALL.md) (this file) | Agent/human install prompt — portable truth |
+| [`UNINSTALL.md`](UNINSTALL.md) | Agent/human uninstall prompt — reverse of harness wiring |
 | [`src/setup.ts`](src/setup.ts) | One-shot: config + init + inject |
 | [`src/init.ts`](src/init.ts) / [`src/vault-layout.ts`](src/vault-layout.ts) | Vault seed dirs + template copy |
 | [`src/inject.ts`](src/inject.ts) / [`src/runtime.ts`](src/runtime.ts) | Harness MCP launch (Bun or Node+tsx) |
