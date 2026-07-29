@@ -144,10 +144,26 @@ Skip any harness the user does not use.
 - Project guidance precedes global.
 - Soft standing prefs → `upsert_guidance` `type=suggestion` (no magic words).
 - Do not fill binding instructions unless I explicitly ask for hard rules.
+- When asked to **setup orchesto**: follow `templates/skills/orchesto/README.md` (project skill only, vault personas, `.plans/` + gitignore).
 
 ### Done criteria
 
 Report: vault path, which harnesses were wired, Bun vs Node MCP launch, and that MCP uses `BRAIN_VAULT`.
+
+---
+
+## Setup orchesto (any product repo)
+
+After the second brain is installed, in **any** git repo the user can say **setup orchesto**. The agent should:
+
+1. Confirm MCP `vault_info` is readable.
+2. Ensure vault has persona notes (copy from this repo’s `templates/vault/workflows/global/persona-*.md` into the vault **only if missing** — never overwrite):
+   - `persona-architect.md`, `persona-implementor.md`, `persona-reviewer.md`
+3. Copy `templates/skills/orchesto/SKILL.md` → `<that-repo>/.cursor/skills/orchesto/SKILL.md` (project skill only — **not** `~/.cursor/skills`). Ask before overwriting an existing diverged skill.
+4. Ensure `<that-repo>/.plans/` exists and `.plans/` is in that repo’s `.gitignore`.
+5. Report skill + persona paths.
+
+Full detail: [`templates/skills/orchesto/README.md`](templates/skills/orchesto/README.md).
 
 ---
 
@@ -173,7 +189,8 @@ When you change **how install works** on a new machine, update **all** of the fo
 | [`src/setup.ts`](src/setup.ts) | One-shot: config + init + inject |
 | [`src/init.ts`](src/init.ts) / [`src/vault-layout.ts`](src/vault-layout.ts) | Vault seed dirs + template copy |
 | [`src/inject.ts`](src/inject.ts) / [`src/runtime.ts`](src/runtime.ts) | Harness MCP launch (Bun or Node+tsx) |
-| [`templates/vault/`](templates/vault/) | What a fresh vault contains |
+| [`templates/vault/`](templates/vault/) | What a fresh vault contains (includes persona workflows) |
+| [`templates/skills/orchesto/`](templates/skills/orchesto/) | Project orchesto skill template + setup README |
 | [`templates/prompts/memory-policy.md`](templates/prompts/memory-policy.md) | Injected slim policy |
 | [`package.json`](package.json) scripts | `setup` / `brain` / `mcp` / `restart-mcp` entrypoints |
 | [`.githooks/post-push`](.githooks/post-push) + [`scripts/restart-mcp.sh`](scripts/restart-mcp.sh) | After push, kill local MCP so the harness respawns with new schemas (`git config core.hooksPath .githooks`) |

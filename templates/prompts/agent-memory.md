@@ -80,6 +80,10 @@ Seeded actions: `coding`, `pr-review`, `commit`, `git`. New actions = vault regi
 
 Project `actions/registry.md` merges with global: project instruction/workflow refs listed first, then global extras.
 
+### Orchesto (project skill)
+
+Personas (`persona-architect` / `persona-implementor` / `persona-reviewer`) live under `workflows/global/` (optional project overlays). They are **not** actions. The pipeline is a **project** Cursor skill (`.cursor/skills/orchesto/`) installed via **setup orchesto** — see `templates/skills/orchesto/README.md`. Do not add an `orchesto` action or vault orchesto workflow.
+
 ---
 
 ## Global vs project (routing)

@@ -22,6 +22,8 @@ Quote paths with spaces. Avoid iCloud/`Mobile Documents` if the editor sandbox r
 
 Then: open vault in Obsidian → restart editors → MCP `vault_info` → `readable: true`.
 
+**Orchesto:** in any product repo, ask the agent to **setup orchesto** (project skill + vault personas). See [`templates/skills/orchesto/README.md`](templates/skills/orchesto/README.md).
+
 ## Runtime / CLI
 
 | Command | Purpose |

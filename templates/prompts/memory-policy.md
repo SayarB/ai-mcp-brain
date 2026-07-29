@@ -38,6 +38,10 @@ To **fix** wrongly placed or incorrect guidance: `upsert_guidance` with `mode: r
 
 When the user asks to **plan** something: write/update a markdown file under **`.plans/`** at the repo root, and ensure **`.plans/`** is in that repo’s **`.gitignore`**. Do not rely on chat-only or `~/.cursor/plans` as the sole copy.
 
+## Setup orchesto
+
+When the user asks to **setup orchesto** in a git repo: follow **`templates/skills/orchesto/README.md`** in the ai-mcp-brain repo (ensure vault personas from templates if missing; copy skill → **project** `.cursor/skills/orchesto/SKILL.md` only — never global `~/.cursor/skills`; ask before overwriting an edited skill; ensure `.plans/` + gitignore). Personas stay in the vault; the skill is procedure only.
+
 ## Binding instructions — explicit only
 
 `instructions/` only when the user means hard process (“must”, “required”, “add as my coding rules”, “never skip”). Never seed instructions from vibes.

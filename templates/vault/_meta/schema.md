@@ -26,7 +26,7 @@ updated: YYYY-MM-DD
 - `external` — stub pointing at a dropped file
 - `instruction` — binding standing rules for a kind of work (coding, commit, …)
 - `suggestion` — soft preferences for a kind (prefer / lean; not must)
-- `workflow` — multi-step playbook
+- `workflow` — multi-step playbook **or** persona profile (`id: persona-*` for orchesto seats)
 
 ## Scope
 
