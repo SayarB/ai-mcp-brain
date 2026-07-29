@@ -4,3 +4,4 @@ config.toml
 *.log
 dist/
 .cursor/mcp.json
+.plans/

@@ -26,9 +26,15 @@ Extend in the vault only: `actions/registry.md` (+ instruction/suggestion/workfl
 
 ## Soft suggestions — auto-log (no magic words)
 
-When the user states a **standing** preference/default (signals: “prefer”, “try to”, “lean”, “when making/doing”, “from now on”, soft “always”), **same turn** call `upsert_guidance` with `type: suggestion`, matching kind (`coding`, `commit`, …). Confirm briefly after logging.
+When the user states a **standing** preference/default (signals: “prefer”, “try to”, “lean”, “when making/doing”, “from now on”, soft “always”), **same turn** call `upsert_guidance` with `type: suggestion`, matching kind (`coding`, `planning`, `commit`, …). Confirm briefly after logging.
 
 Do **not** wait for “remember this” / “add to brain”.
+
+To **fix** wrongly placed or incorrect guidance: `upsert_guidance` with `mode: replace` (rewrites the whole note). Default remains append.
+
+## Plans (every git repo)
+
+When the user asks to **plan** something: write/update a markdown file under **`.plans/`** at the repo root, and ensure **`.plans/`** is in that repo’s **`.gitignore`**. Do not rely on chat-only or `~/.cursor/plans` as the sole copy.
 
 ## Binding instructions — explicit only
 

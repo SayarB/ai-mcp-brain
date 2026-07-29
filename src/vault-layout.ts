@@ -24,6 +24,7 @@ export const REQUIRED_VAULT_DIRS = [
 /** Seeded guidance kinds (empty shells under instructions/ and suggestions/). */
 export const SEEDED_GUIDANCE_KINDS = [
   "coding",
+  "planning",
   "pr-review",
   "commit",
   "git",

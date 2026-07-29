@@ -359,7 +359,7 @@ export function createBrainServer(): McpServer {
     {
       title: "Upsert guidance",
       description:
-        "Create or append an instruction, soft suggestion, or workflow note. Soft standing prefs → type=suggestion (no magic words). Binding process → type=instruction only when user means hard rules. Ask global vs project if unclear.",
+        "Create, append, or fully replace an instruction, soft suggestion, or workflow note. Soft standing prefs → type=suggestion (no magic words). Binding process → type=instruction only when user means hard rules. Use mode=replace to fix wrongly placed or incorrect guidance (rewrites the whole note). Ask global vs project if unclear.",
       inputSchema: {
         type: z.enum(["instruction", "suggestion", "workflow"]),
         content: z.string().min(1),
@@ -375,14 +375,21 @@ export function createBrainServer(): McpServer {
           .optional()
           .describe("Git repo slug when scope=project"),
         tags: z.array(z.string()).optional(),
+        mode: z
+          .enum(["append", "replace"])
+          .optional()
+          .describe(
+            "append (default): add ## Update block. replace: rewrite entire note — use to correct mistakes.",
+          ),
       },
     },
     async (args) => {
       try {
         const vault = await resolveVault();
         const note = await upsertGuidance(vault, args);
+        const how = args.mode === "replace" ? "Replaced" : "Wrote";
         return textResult(
-          `Wrote ${note.path}\n\n${noteToSummary(note, 800)}`,
+          `${how} ${note.path}\n\n${noteToSummary(note, 800)}`,
         );
       } catch (err) {
         return errorResult(err);

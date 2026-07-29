@@ -535,6 +535,12 @@ export type UpsertGuidanceInput = {
   scope: "global" | "project";
   project?: string;
   tags?: string[];
+  /**
+   * append (default) — add an ## Update block to an existing note.
+   * replace — rewrite the whole note (frontmatter + title + content). Use to fix
+   * wrongly placed or incorrect guidance without leaving stale sections.
+   */
+  mode?: "append" | "replace";
 };
 
 function guidancePaths(
@@ -858,8 +864,35 @@ export async function upsertGuidance(
       : input.type === "suggestion"
         ? `Suggestions: ${kindOrId}`
         : `Instructions: ${kindOrId}`);
+  const writeMode = input.mode ?? "append";
+
+  const renderNote = (): string =>
+    [
+      "---",
+      `type: ${input.type}`,
+      input.type === "workflow"
+        ? `id: ${slugify(kindOrId)}`
+        : `kind: ${slugify(kindOrId)}`,
+      input.type === "suggestion" ? "weight: soft" : null,
+      `scope: ${input.scope}`,
+      input.project ? `project: ${slugify(input.project)}` : null,
+      `tags: [${tags.map((t) => JSON.stringify(t)).join(", ")}]`,
+      `updated: ${date}`,
+      "---",
+      "",
+      `# ${title}`,
+      "",
+      input.content.trim(),
+      "",
+    ]
+      .filter((l) => l !== null)
+      .join("\n");
 
   if (await pathExists(abs)) {
+    if (writeMode === "replace") {
+      await writeText(abs, renderNote());
+      return readNote(vaultPath, relPath);
+    }
     const prev = await readText(abs);
     await writeText(
       abs,
@@ -868,27 +901,6 @@ export async function upsertGuidance(
     return readNote(vaultPath, relPath);
   }
 
-  const fm = [
-    "---",
-    `type: ${input.type}`,
-    input.type === "workflow"
-      ? `id: ${slugify(kindOrId)}`
-      : `kind: ${slugify(kindOrId)}`,
-    input.type === "suggestion" ? "weight: soft" : null,
-    `scope: ${input.scope}`,
-    input.project ? `project: ${slugify(input.project)}` : null,
-    `tags: [${tags.map((t) => JSON.stringify(t)).join(", ")}]`,
-    `updated: ${date}`,
-    "---",
-    "",
-    `# ${title}`,
-    "",
-    input.content.trim(),
-    "",
-  ]
-    .filter((l) => l !== null)
-    .join("\n");
-
-  await writeText(abs, fm);
+  await writeText(abs, renderNote());
   return readNote(vaultPath, relPath);
 }

@@ -9,6 +9,7 @@ updated: 2026-07-24
 | Kind | Path | Purpose |
 |------|------|---------|
 | coding | suggestions/global/coding.md | Soft coding preferences |
+| planning | suggestions/global/planning.md | Soft planning preferences (`.plans/`, etc.) |
 | pr-review | suggestions/global/pr-review.md | Soft review preferences |
 | commit | suggestions/global/commit.md | Soft commit preferences |
 | git | suggestions/global/git.md | Soft git preferences |

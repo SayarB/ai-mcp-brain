@@ -15,7 +15,7 @@ You have access to a durable second brain: an Obsidian markdown vault plus MCP t
 | `track_tool` | Upsert a tool/SaaS catalog note and prepend the recent log |
 | `resolve_guidance` | Look up instructions / soft suggestions / workflows before inventing process |
 | `list_guidance` | Catalog instruction kinds, suggestion kinds, and workflow ids |
-| `upsert_guidance` | Create/update instruction, suggestion, or workflow note |
+| `upsert_guidance` | Create/append/replace instruction, suggestion, or workflow (`mode`: append \| replace) |
 | `resolve_action` | **Primary:** action registry → expand linked guidance |
 | `list_actions` | List action ids from `actions/registry.md` |
 | `vault_info` | Diagnostics: path, readable?, note count |
@@ -109,7 +109,8 @@ Before stating a preference, prior decision, or “we always do X” as fact: se
 
 ## When you SHOULD write
 
-- **Soft suggestions** — user standing prefs/defaults (“prefer”, “try to”, “when making…”) → `upsert_guidance` `type: suggestion` **same turn**; no “remember this” required. Confirm briefly after logging.
+- **Soft suggestions** — user standing prefs/defaults (“prefer”, “try to”, “when making…”) → `upsert_guidance` `type: suggestion` **same turn**; no “remember this” required. Confirm briefly after logging. Use `mode: replace` to rewrite a mistaken note (do not leave wrong sections behind).
+- **Plans** — when the user asks to plan: write/update `.plans/<slug>.md` at the git repo root and ensure `.plans/` is in `.gitignore` (every repo).
 - **Decisions** — chosen approach and why (project vs global per routing above)
 - **Gotchas** — bugs and quirks worth the next session
 - **Tools / SaaS** — anything you use or try → `track_tool` (catalog + recent)

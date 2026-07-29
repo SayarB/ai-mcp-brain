@@ -76,7 +76,7 @@ My Brain/
 | `vault_info` | Diagnostics: path, readable?, note count |
 | `resolve_guidance` | Look up instructions / soft suggestions / workflows |
 | `list_guidance` | List instruction kinds, suggestion kinds, workflow ids |
-| `upsert_guidance` | Create/update instruction, suggestion, or workflow |
+| `upsert_guidance` | Create/append/replace instruction, suggestion, or workflow (`mode`: `append` \| `replace`) |
 | `resolve_action` | Action registry → expand instructions + soft suggestions (+ workflows) |
 | `list_actions` | List action ids from `actions/registry.md` |
 
