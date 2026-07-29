@@ -9,7 +9,8 @@
   "scripts": {
     "setup": "tsx src/setup.ts",
     "brain": "tsx src/cli.ts",
-    "mcp": "tsx src/mcp/server.ts"
+    "mcp": "tsx src/mcp/server.ts",
+    "restart-mcp": "bash scripts/restart-mcp.sh"
   },
   "devDependencies": {
     "@types/bun": "latest",

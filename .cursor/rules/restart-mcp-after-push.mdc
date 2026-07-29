@@ -1,0 +1,18 @@
+---
+description: After pushing this repo, restart ai-mcp-brain MCP so tool schemas reload
+alwaysApply: true
+---
+
+# Restart MCP after push (ai-mcp-brain)
+
+When you **push** commits from this repository (or the user asks you to push):
+
+1. After a successful `git push`, run:
+
+```bash
+bash scripts/restart-mcp.sh
+```
+
+2. Tell the user MCP processes were restarted; if the next MCP call still validates against an old schema, they should **reload the editor window**.
+
+Do not skip this after a push that includes MCP/server, vault tooling, or tool schema changes — and prefer running it after **any** push of this repo so local agents never keep a stale server.

@@ -32,6 +32,14 @@ Then: open vault in Obsidian → restart editors → MCP `vault_info` → `reada
 
 Inject prefers **Bun** for the MCP command when available; otherwise **Node + `tsx`**. Env: `BRAIN_VAULT` overrides vault path.
 
+After cloning this repo, enable git hooks once so **post-push restarts local MCP**:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+Or run manually anytime: `npm run restart-mcp` / `bash scripts/restart-mcp.sh`.
+
 ## Vault layout
 
 ```

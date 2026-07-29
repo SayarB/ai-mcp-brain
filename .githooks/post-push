@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# After a successful push of this repo, restart local MCP servers so tool
+# schemas match the code that was just published.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+exec bash "${ROOT}/scripts/restart-mcp.sh"

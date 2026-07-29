@@ -175,7 +175,8 @@ When you change **how install works** on a new machine, update **all** of the fo
 | [`src/inject.ts`](src/inject.ts) / [`src/runtime.ts`](src/runtime.ts) | Harness MCP launch (Bun or Node+tsx) |
 | [`templates/vault/`](templates/vault/) | What a fresh vault contains |
 | [`templates/prompts/memory-policy.md`](templates/prompts/memory-policy.md) | Injected slim policy |
-| [`package.json`](package.json) scripts | `setup` / `brain` / `mcp` entrypoints |
+| [`package.json`](package.json) scripts | `setup` / `brain` / `mcp` / `restart-mcp` entrypoints |
+| [`.githooks/post-push`](.githooks/post-push) + [`scripts/restart-mcp.sh`](scripts/restart-mcp.sh) | After push, kill local MCP so the harness respawns with new schemas (`git config core.hooksPath .githooks`) |
 | [`config.example.toml`](config.example.toml), [`mcp.cursor.example.json`](mcp.cursor.example.json) | Portable examples (placeholders) |
 | [`README.md`](README.md) install blurb | Points here |
 

@@ -77,6 +77,7 @@ Next:
   2. Restart Cursor / Claude / Codex / Zed so MCP reloads
   3. Call MCP tool vault_info — expect readable: true
   4. Soft prefs auto-log to suggestions/; binding rules go in instructions/ only when you mean hard process
+  5. In this repo: git config core.hooksPath .githooks  (post-push restarts local MCP)
 `);
 }
 
