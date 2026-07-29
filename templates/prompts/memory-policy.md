@@ -14,6 +14,8 @@ Full policy: repo `templates/prompts/agent-memory.md`.
 
 Call **`resolve_action`** when **entering a mode** (PR review, commit, git ops, non-trivial feature/refactor), on mode switch, if not yet resolved this thread, or if the user asks to reload rules.
 
+**Reuse if already in context:** Before calling `resolve_action`, check this chat for an earlier successful bundle for the **same action** (tool result or quoted guidance). If it is already present and you have not switched mode, **do not call MCP again** — follow that bundle. Re-resolve only on mode switch, user reload request, or when this thread has no bundle for that action yet.
+
 - Prefer explicit `action` id; soft intent is fallback.
 - Follow returned guidance. **Project overrides / precedes global.**
 - **Instructions** = binding. **Suggestions** = soft (prefer, not must).

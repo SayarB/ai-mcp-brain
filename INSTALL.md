@@ -101,7 +101,7 @@ Example shape: `mcp.cursor.example.json` (placeholders only — never commit mac
 
 #### E. Wire harnesses (only if the path exists or can be created)
 
-Policy text comes from `templates/prompts/memory-policy.md` with `{{VAULT_PATH}}` (and other placeholders) replaced. Injected slim policy must mention: `resolve_action` mode-start, soft suggestions auto-log, binding instructions explicit-only.
+Policy text comes from `templates/prompts/memory-policy.md` with `{{VAULT_PATH}}` (and other placeholders) replaced. Injected slim policy must mention: `resolve_action` mode-start, reuse bundle already in this chat for the same action (no repeat MCP call), soft suggestions auto-log, binding instructions explicit-only.
 
 **Cursor**
 
@@ -140,7 +140,7 @@ Skip any harness the user does not use.
 
 ### Policy reminders to leave in place
 
-- `resolve_action` on **mode start only** (not every turn).
+- `resolve_action` on **mode start only** (not every turn). Reuse an earlier same-action bundle already in this chat; re-resolve only on mode switch / reload / missing bundle.
 - Project guidance precedes global.
 - Soft standing prefs → `upsert_guidance` `type=suggestion` (no magic words).
 - Do not fill binding instructions unless I explicitly ask for hard rules.

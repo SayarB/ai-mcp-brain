@@ -70,12 +70,13 @@ Seeded actions: `coding`, `pr-review`, `commit`, `git`. New actions = vault regi
 **Before** coding / PR review / writing commits / git process work:
 
 1. Call **`resolve_action`** at **mode start** (not every turn): PR review, commit, git, non-trivial feature; also on mode switch / reload request.
-2. Prefer explicit `action` id; intent matching is fallback.
-3. Follow the bundle. **Project guidance precedes global.** Instructions are binding; suggestions are soft.
-4. Instruction files may be **empty** — that is OK. Do **not** invent binding process unless the user explicitly asks for hard rules.
-5. Never invent conflicting process when guidance exists.
+2. **Reuse if already in context:** If this chat already contains a successful `resolve_action` (or equivalent) bundle for the **same action**, do **not** call MCP again — use that bundle. Re-resolve only on mode switch, explicit reload, or when no bundle for that action is in the thread yet.
+3. Prefer explicit `action` id; intent matching is fallback.
+4. Follow the bundle. **Project guidance precedes global.** Instructions are binding; suggestions are soft.
+5. Instruction files may be **empty** — that is OK. Do **not** invent binding process unless the user explicitly asks for hard rules.
+6. Never invent conflicting process when guidance exists.
 
-`resolve_guidance` remains for direct kind/id lookup; prefer `resolve_action` for work modes.
+`resolve_guidance` remains for direct kind/id lookup; prefer `resolve_action` for work modes. Same reuse rule: do not re-fetch guidance already present in this thread for the same kind/id unless reload/mode switch.
 
 Project `actions/registry.md` merges with global: project instruction/workflow refs listed first, then global extras.
 
