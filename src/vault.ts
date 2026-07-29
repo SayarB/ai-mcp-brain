@@ -528,7 +528,8 @@ export type ResolveGuidanceInput = {
 
 export type UpsertGuidanceInput = {
   type: GuidanceType;
-  content: string;
+  /** Required except for mode=remove_section. */
+  content?: string;
   title?: string;
   kind?: string;
   workflow_id?: string;
@@ -536,12 +537,97 @@ export type UpsertGuidanceInput = {
   project?: string;
   tags?: string[];
   /**
-   * append (default) — add an ## Update block to an existing note.
-   * replace — rewrite the whole note (frontmatter + title + content). Use to fix
-   * wrongly placed or incorrect guidance without leaving stale sections.
+   * append (default) — add an ## Update block.
+   * replace_section — replace only the markdown section matching `section` (other sections untouched).
+   * remove_section — remove only the markdown section matching `section`.
+   * replace — rewrite the entire note (frontmatter + title + content). Prefer *_section when fixing one block.
    */
-  mode?: "append" | "replace";
+  mode?: "append" | "replace" | "replace_section" | "remove_section";
+  /** Heading text to target (with or without leading #). Required for *_section modes. */
+  section?: string;
 };
+
+/** Find a markdown section by heading text. Returns [start, end) offsets into `markdown`. */
+export function findMarkdownSection(
+  markdown: string,
+  sectionQuery: string,
+): { start: number; end: number; level: number; heading: string } {
+  const needle = sectionQuery
+    .trim()
+    .replace(/^#{1,6}\s+/, "")
+    .trim()
+    .toLowerCase();
+  if (!needle) {
+    throw new Error("section must be a non-empty heading match string");
+  }
+
+  const headingRe = /^(#{1,6})\s+(.+?)\s*$/gm;
+  type Hit = { start: number; level: number; heading: string; textStart: number };
+  const hits: Hit[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = headingRe.exec(markdown)) !== null) {
+    const level = m[1]!.length;
+    const heading = m[2]!.trim();
+    hits.push({
+      start: m.index,
+      level,
+      heading,
+      textStart: m.index + m[0].length,
+    });
+  }
+
+  const exact = hits.filter((h) => h.heading.toLowerCase() === needle);
+  const partial = hits.filter((h) => h.heading.toLowerCase().includes(needle));
+  const matched = exact.length ? exact : partial;
+
+  if (!matched.length) {
+    const available = hits.map((h) => `${"#".repeat(h.level)} ${h.heading}`).join("; ");
+    throw new Error(
+      `No heading matched section=${JSON.stringify(sectionQuery)}` +
+        (available ? `. Available: ${available}` : ""),
+    );
+  }
+  if (matched.length > 1) {
+    throw new Error(
+      `Ambiguous section=${JSON.stringify(sectionQuery)}; matches: ${matched
+        .map((h) => h.heading)
+        .join(", ")}. Pass a more specific heading.`,
+    );
+  }
+
+  const hit = matched[0]!;
+  const hitIndex = hits.indexOf(hit);
+  let end = markdown.length;
+  for (let i = hitIndex + 1; i < hits.length; i++) {
+    const next = hits[i]!;
+    if (next.level <= hit.level) {
+      end = next.start;
+      break;
+    }
+  }
+
+  return { start: hit.start, end, level: hit.level, heading: hit.heading };
+}
+
+function applySectionReplace(
+  markdown: string,
+  sectionQuery: string,
+  content: string,
+): string {
+  const { start, end, level, heading } = findMarkdownSection(markdown, sectionQuery);
+  const trimmed = content.trim();
+  const replacement = trimmed.startsWith("#")
+    ? `${trimmed}\n`
+    : `${"#".repeat(level)} ${heading}\n\n${trimmed}\n`;
+  const next = `${markdown.slice(0, start)}${replacement}${markdown.slice(end)}`;
+  return next.replace(/\n{3,}/g, "\n\n");
+}
+
+function applySectionRemove(markdown: string, sectionQuery: string): string {
+  const { start, end } = findMarkdownSection(markdown, sectionQuery);
+  const next = `${markdown.slice(0, start)}${markdown.slice(end)}`;
+  return next.replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
+}
 
 function guidancePaths(
   type: GuidanceType,
@@ -865,6 +951,17 @@ export async function upsertGuidance(
         ? `Suggestions: ${kindOrId}`
         : `Instructions: ${kindOrId}`);
   const writeMode = input.mode ?? "append";
+  const body = (input.content ?? "").trim();
+
+  if (writeMode !== "remove_section" && !body) {
+    throw new Error("content is required unless mode=remove_section");
+  }
+  if (
+    (writeMode === "replace_section" || writeMode === "remove_section") &&
+    !input.section?.trim()
+  ) {
+    throw new Error(`mode=${writeMode} requires section (heading text to target)`);
+  }
 
   const renderNote = (): string =>
     [
@@ -882,7 +979,7 @@ export async function upsertGuidance(
       "",
       `# ${title}`,
       "",
-      input.content.trim(),
+      body,
       "",
     ]
       .filter((l) => l !== null)
@@ -893,12 +990,31 @@ export async function upsertGuidance(
       await writeText(abs, renderNote());
       return readNote(vaultPath, relPath);
     }
+    if (writeMode === "replace_section") {
+      const prev = await readText(abs);
+      await writeText(abs, applySectionReplace(prev, input.section!, body));
+      return readNote(vaultPath, relPath);
+    }
+    if (writeMode === "remove_section") {
+      const prev = await readText(abs);
+      await writeText(abs, applySectionRemove(prev, input.section!));
+      return readNote(vaultPath, relPath);
+    }
     const prev = await readText(abs);
     await writeText(
       abs,
-      `${prev.trimEnd()}\n\n## Update ${date}\n\n${input.content.trim()}\n`,
+      `${prev.trimEnd()}\n\n## Update ${date}\n\n${body}\n`,
     );
     return readNote(vaultPath, relPath);
+  }
+
+  if (
+    writeMode === "replace_section" ||
+    writeMode === "remove_section"
+  ) {
+    throw new Error(
+      `Cannot ${writeMode}: note does not exist yet (${relPath}). Create it first with append or replace.`,
+    );
   }
 
   await writeText(abs, renderNote());

@@ -15,7 +15,7 @@ You have access to a durable second brain: an Obsidian markdown vault plus MCP t
 | `track_tool` | Upsert a tool/SaaS catalog note and prepend the recent log |
 | `resolve_guidance` | Look up instructions / soft suggestions / workflows before inventing process |
 | `list_guidance` | Catalog instruction kinds, suggestion kinds, and workflow ids |
-| `upsert_guidance` | Create/append/replace instruction, suggestion, or workflow (`mode`: append \| replace) |
+| `upsert_guidance` | Create/append/section-edit/replace guidance (`mode`: append \| replace_section \| remove_section \| replace) |
 | `resolve_action` | **Primary:** action registry → expand linked guidance |
 | `list_actions` | List action ids from `actions/registry.md` |
 | `vault_info` | Diagnostics: path, readable?, note count |
@@ -114,7 +114,7 @@ Before stating a preference, prior decision, or “we always do X” as fact: se
 
 ## When you SHOULD write
 
-- **Soft suggestions** — user standing prefs/defaults (“prefer”, “try to”, “when making…”) → `upsert_guidance` `type: suggestion` **same turn**; no “remember this” required. Confirm briefly after logging. Use `mode: replace` to rewrite a mistaken note (do not leave wrong sections behind).
+- **Soft suggestions** — user standing prefs/defaults (“prefer”, “try to”, “when making…”) → `upsert_guidance` `type: suggestion` **same turn**; no “remember this” required. Confirm briefly after logging. To fix a bad update: `mode: replace_section` or `remove_section` with `section` set to that heading. Use `mode: replace` only when rewriting the whole note.
 - **Plans** — when the user asks to plan: write/update `.plans/<slug>.md` at the git repo root and ensure `.plans/` is in `.gitignore` (every repo).
 - **Decisions** — chosen approach and why (project vs global per routing above)
 - **Gotchas** — bugs and quirks worth the next session

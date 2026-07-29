@@ -32,7 +32,7 @@ When the user states a **standing** preference/default (signals: “prefer”, �
 
 Do **not** wait for “remember this” / “add to brain”.
 
-To **fix** wrongly placed or incorrect guidance: `upsert_guidance` with `mode: replace` (rewrites the whole note). Default remains append.
+To **fix** wrongly placed or incorrect guidance: prefer `upsert_guidance` with `mode: replace_section` or `remove_section` and `section: "<heading text>"` so other sections stay untouched. Use `mode: replace` when intentionally rewriting the **entire** note. Default remains append.
 
 ## Plans (every git repo)
 

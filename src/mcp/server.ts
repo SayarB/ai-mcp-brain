@@ -359,10 +359,13 @@ export function createBrainServer(): McpServer {
     {
       title: "Upsert guidance",
       description:
-        "Create, append, or fully replace an instruction, soft suggestion, or workflow note. Soft standing prefs → type=suggestion (no magic words). Binding process → type=instruction only when user means hard rules. Use mode=replace to fix wrongly placed or incorrect guidance (rewrites the whole note). Ask global vs project if unclear.",
+        "Create or surgically update an instruction, soft suggestion, or workflow note. Prefer mode=append (default), replace_section, or remove_section so other sections stay intact. mode=replace rewrites the entire note. Soft prefs → type=suggestion. Binding process → type=instruction only for hard rules.",
       inputSchema: {
         type: z.enum(["instruction", "suggestion", "workflow"]),
-        content: z.string().min(1),
+        content: z
+          .string()
+          .optional()
+          .describe("Required except mode=remove_section"),
         title: z.string().optional(),
         kind: z
           .string()
@@ -376,10 +379,16 @@ export function createBrainServer(): McpServer {
           .describe("Git repo slug when scope=project"),
         tags: z.array(z.string()).optional(),
         mode: z
-          .enum(["append", "replace"])
+          .enum(["append", "replace", "replace_section", "remove_section"])
           .optional()
           .describe(
-            "append (default): add ## Update block. replace: rewrite entire note — use to correct mistakes.",
+            "append (default); replace_section / remove_section (need section=); replace (full note rewrite)",
+          ),
+        section: z
+          .string()
+          .optional()
+          .describe(
+            "Heading text to target for replace_section / remove_section (e.g. \"Update 2026-07-29\")",
           ),
       },
     },
@@ -387,7 +396,14 @@ export function createBrainServer(): McpServer {
       try {
         const vault = await resolveVault();
         const note = await upsertGuidance(vault, args);
-        const how = args.mode === "replace" ? "Replaced" : "Wrote";
+        const how =
+          args.mode === "replace"
+            ? "Replaced (full note)"
+            : args.mode === "replace_section"
+              ? "Replaced section"
+              : args.mode === "remove_section"
+                ? "Removed section"
+                : "Wrote";
         return textResult(
           `${how} ${note.path}\n\n${noteToSummary(note, 800)}`,
         );
