@@ -3,7 +3,7 @@ type: workflow
 id: setup-orchesto
 scope: global
 tags: [orchesto, setup]
-updated: 2026-07-30
+updated: 2026-07-31
 ---
 
 # Setup orchesto
@@ -21,6 +21,7 @@ When the user asks to **setup orchesto** in a git repo, do the following in that
 
 These vault notes must exist (create from brain templates only if **missing** — never overwrite existing):
 
+- `workflows/global/persona-cpo.md`
 - `workflows/global/persona-architect.md`
 - `workflows/global/persona-implementor.md`
 - `workflows/global/persona-reviewer.md`
@@ -52,9 +53,10 @@ Tell the user:
 
 - Skill path(s) installed (Zed and/or Cursor as above — edit DAG per project there)
 - Personas: `workflows/global/persona-*.md` (per-repo overlays: `projects/<slug>/workflows/persona-*.md`)
+- Runtime: Orchesto **always asks** whether a PRD/CPO pass is needed before architect; CPO is optional
 
 ## Day-to-day (after setup)
 
-The project skill runs architect → plan + validations → implementor → reviewer (fix loop ≤ 3). User does not need to say “run orchesto.”
+The project skill runs optional CPO (PRD) → architect → plan + validations → implementor → reviewer (fix loop ≤ 3). User does not need to say “run orchesto.”
 
 Standalone `resolve_action` (e.g. `pr-review`) still works without this skill or any persona.

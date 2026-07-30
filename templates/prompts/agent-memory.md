@@ -82,7 +82,7 @@ Project `actions/registry.md` merges with global: project instruction/workflow r
 
 ### Orchesto (project skill)
 
-Orchesto personas (`persona-architect` / `persona-implementor` / `persona-reviewer`) live under `workflows/global/` (optional project overlays). They are **not** actions. Setup playbook: `workflows/global/setup-orchesto.md`. The pipeline is a **project** skill installed via that playbook (Zed `.agents/skills/orchesto/`, Cursor `.cursor/skills/orchesto/`). Do not add an `orchesto` action.
+Orchesto personas (`persona-cpo` optional / `persona-architect` / `persona-implementor` / `persona-reviewer`) live under `workflows/global/` (optional project overlays). They are **not** actions. Setup playbook: `workflows/global/setup-orchesto.md`. The pipeline is a **project** skill installed via that playbook (Zed `.agents/skills/orchesto/`, Cursor `.cursor/skills/orchesto/`). Orchesto **always asks** whether a PRD / CPO pass is needed before architect; seat CPO only on user yes. Do not add an `orchesto` action.
 
 ### Auditor (standalone persona)
 
