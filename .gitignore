@@ -5,3 +5,4 @@ config.toml
 dist/
 .cursor/mcp.json
 .plans/
+.audits/

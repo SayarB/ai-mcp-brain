@@ -1,7 +1,7 @@
 ---
 type: workflow
 tags: [meta]
-updated: 2026-07-24
+updated: 2026-07-30
 ---
 
 # Workflows
@@ -12,6 +12,10 @@ Multi-step playbooks and **persona profiles** (who the agent acts as).
 - Per git repo: `projects/<slug>/workflows/<id>.md`
 - Registry: [[_index]]
 
-**Personas** (`persona-architect`, `persona-implementor`, `persona-reviewer`) are behavioral seats used by the project **orchesto** skill. They are not `resolve_action` ids. Edit global defaults here; override per repo under `projects/<slug>/workflows/`.
+**Orchesto personas** (`persona-architect`, `persona-implementor`, `persona-reviewer`) are behavioral seats used by the project **orchesto** skill.
+
+**Standalone personas** (`persona-auditor`) are seated on demand — not part of Orchesto. Auditor runs holistic audits (security, secrets, privacy, correctness, deps, code quality) of a repo or scoped area and writes `.audits/<scope-slug>/report.md`.
+
+Personas are not `resolve_action` ids. Edit global defaults here; override per repo under `projects/<slug>/workflows/`.
 
 Agents: `read_note` / `resolve_guidance` with `workflow_id`. Prefer existing playbooks over inventing new process.

@@ -42,6 +42,10 @@ When the user asks to **plan** something: write/update a markdown file under **`
 
 When the user asks to **setup orchesto**: call MCP `read_note` on `workflows/global/setup-orchesto.md` and follow it. **Do not web-search.** Orchesto ≠ Orca/orca-cli.
 
+## Audit (auditor persona)
+
+When the user asks to **audit** a repo/area (or to seat **auditor**): `read_note` `workflows/global/persona-auditor.md` (project overlay if present), seat that persona, and write `.audits/<scope-slug>/report.md`. Ensure `.audits/` is in that repo’s `.gitignore`. Auditor is **not** Orchesto and is **not** the PR reviewer — holistic findings, report-first.
+
 ## Binding instructions — explicit only
 
 `instructions/` only when the user means hard process (“must”, “required”, “add as my coding rules”, “never skip”). Never seed instructions from vibes.

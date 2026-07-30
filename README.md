@@ -28,6 +28,8 @@ Then: open vault in Obsidian → restart editors → MCP `vault_info` → `reada
 
 **Orchesto:** in any product repo, ask the agent to **setup orchesto** — it should `read_note` vault `workflows/global/setup-orchesto.md`. See also [`templates/skills/orchesto/`](templates/skills/orchesto/).
 
+**Auditor:** ask the agent to **audit** a repo or area — it should `read_note` vault `workflows/global/persona-auditor.md`, seat that persona, and write `.audits/<scope-slug>/report.md` (standalone; not part of Orchesto).
+
 ## Runtime / CLI
 
 | Command | Purpose |

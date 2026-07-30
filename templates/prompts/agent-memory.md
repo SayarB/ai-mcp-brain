@@ -82,7 +82,11 @@ Project `actions/registry.md` merges with global: project instruction/workflow r
 
 ### Orchesto (project skill)
 
-Personas (`persona-architect` / `persona-implementor` / `persona-reviewer`) live under `workflows/global/` (optional project overlays). They are **not** actions. Setup playbook: `workflows/global/setup-orchesto.md`. The pipeline is a **project** Cursor skill installed via that playbook. Do not add an `orchesto` action.
+Orchesto personas (`persona-architect` / `persona-implementor` / `persona-reviewer`) live under `workflows/global/` (optional project overlays). They are **not** actions. Setup playbook: `workflows/global/setup-orchesto.md`. The pipeline is a **project** skill installed via that playbook (Zed `.agents/skills/orchesto/`, Cursor `.cursor/skills/orchesto/`). Do not add an `orchesto` action.
+
+### Auditor (standalone persona)
+
+`persona-auditor` is **not** part of Orchesto. When the user asks to audit a repo/area: `read_note` `workflows/global/persona-auditor.md` (project overlay if present), seat it, write `.audits/<scope-slug>/report.md`, and ensure `.audits/` is gitignored. Reviewer = change/PR cleanliness; auditor = holistic vulnerabilities/bugs/issues in scope.
 
 ---
 
@@ -116,6 +120,7 @@ Before stating a preference, prior decision, or “we always do X” as fact: se
 
 - **Soft suggestions** — user standing prefs/defaults (“prefer”, “try to”, “when making…”) → `upsert_guidance` `type: suggestion` **same turn**; no “remember this” required. Confirm briefly after logging. To fix a bad update: `mode: replace_section` or `remove_section` with `section` set to that heading. Use `mode: replace` only when rewriting the whole note.
 - **Plans** — when the user asks to plan: write/update `.plans/<slug>.md` at the git repo root and ensure `.plans/` is in `.gitignore` (every repo).
+- **Audits** — when seating auditor: write `.audits/<scope-slug>/report.md` and ensure `.audits/` is in `.gitignore`.
 - **Decisions** — chosen approach and why (project vs global per routing above)
 - **Gotchas** — bugs and quirks worth the next session
 - **Tools / SaaS** — anything you use or try → `track_tool` (catalog + recent)

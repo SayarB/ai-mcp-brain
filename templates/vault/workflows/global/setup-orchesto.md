@@ -3,7 +3,7 @@ type: workflow
 id: setup-orchesto
 scope: global
 tags: [orchesto, setup]
-updated: 2026-07-29
+updated: 2026-07-30
 ---
 
 # Setup orchesto
@@ -15,7 +15,7 @@ When the user asks to **setup orchesto** in a git repo, do the following in that
 ## 1. Vault + MCP
 
 - Call `vault_info` — expect `readable: true`.
-- Personas and this playbook live in the vault. The pipeline skill is **project-only** (never `~/.cursor/skills`).
+- Personas and this playbook live in the vault. The pipeline skill is **project-only** (never global user skill dirs).
 
 ## 2. Ensure personas (idempotent)
 
@@ -27,12 +27,19 @@ These vault notes must exist (create from brain templates only if **missing** �
 
 If missing: copy from the ai-mcp-brain checkout that runs this MCP (`templates/vault/workflows/global/persona-*.md`). Discover that checkout via the MCP server working directory if needed. Prefer `read_note` on the paths above once present.
 
-## 3. Install project skill (Cursor)
+## 3. Install project skill (harness adapter)
 
 1. Read the skill body from vault note `workflows/global/orchesto-skill-template.md` (or from ai-mcp-brain `templates/skills/orchesto/SKILL.md` if that note is missing).
-2. Write it to **`<this-git-repo>/.cursor/skills/orchesto/SKILL.md`** (create directories).
-3. If that file already exists and differs, **ask** before overwrite.
-4. Do **not** install under `~/.cursor/skills/`.
+2. Detect the coding harness (user said which editor, or project markers). Install the **same** `SKILL.md` body to the matching **project-local** path(s):
+
+| Harness | Project skill path |
+|---------|-------------------|
+| **Zed** | `<repo>/.agents/skills/orchesto/SKILL.md` |
+| **Cursor** | `<repo>/.cursor/skills/orchesto/SKILL.md` |
+
+3. If the user named a harness (e.g. “this is zed”), install that path only. If unclear or they use both, install both.
+4. If a target file already exists and differs, **ask** before overwrite.
+5. Do **not** install under `~/.agents/skills/` or `~/.cursor/skills/`.
 
 ## 4. Plans folder
 
@@ -43,7 +50,7 @@ If missing: copy from the ai-mcp-brain checkout that runs this MCP (`templates/v
 
 Tell the user:
 
-- Skill path: `.cursor/skills/orchesto/SKILL.md` (edit DAG per project here)
+- Skill path(s) installed (Zed and/or Cursor as above — edit DAG per project there)
 - Personas: `workflows/global/persona-*.md` (per-repo overlays: `projects/<slug>/workflows/persona-*.md`)
 
 ## Day-to-day (after setup)

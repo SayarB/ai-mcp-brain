@@ -1,17 +1,4 @@
 ---
-type: workflow
-id: orchesto-skill-template
-scope: global
-tags: [orchesto, skill-template]
-updated: 2026-07-30
----
-
-# Orchesto skill template (for project install)
-
-When **setup orchesto** runs, copy the fenced `SKILL.md` body below into the harness adapter path (including the YAML frontmatter): Zed → `<git-repo>/.agents/skills/orchesto/SKILL.md`; Cursor → `<git-repo>/.cursor/skills/orchesto/SKILL.md`. Keep this note in sync with ai-mcp-brain `templates/skills/orchesto/SKILL.md`.
-
-```markdown
----
 name: orchesto
 description: >-
   Multi-phase feature delivery using vault personas: architect writes plan and
@@ -79,4 +66,3 @@ Short coordinator note: what shipped, validation status, rounds used, open follo
 - Skip validations or the review report
 - Load personas outside this skill’s pipeline unless the user asks
 - Duplicate vault persona / pr-review / coding essays into this file
-```
