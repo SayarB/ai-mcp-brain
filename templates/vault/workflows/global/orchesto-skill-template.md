@@ -14,11 +14,11 @@ When **setup orchesto** runs, copy the fenced `SKILL.md` body below into the har
 ---
 name: orchesto
 description: >-
-  Multi-phase feature delivery using vault personas: optional CPO writes a PRD,
-  architect writes plan and validations, implementor builds, reviewer checks
-  against validations with at most three fix rounds. Use when shipping a feature
-  end-to-end with plan, validations, and review — not for tiny one-off edits or
-  a lone PR review.
+  Multi-phase feature delivery using vault personas: optional brainstormer
+  (conversation) then optional CPO writes a PRD, architect writes plan and
+  validations, implementor builds, reviewer checks against validations with at
+  most three fix rounds. Use when shipping a feature end-to-end with plan,
+  validations, and review — not for tiny one-off edits or a lone PR review.
 ---
 
 # Orchesto
@@ -28,7 +28,7 @@ Procedure only. Persona bodies and action process live in the second-brain vault
 ## Prerequisites
 
 - ai-mcp-brain MCP available (`BRAIN_VAULT`)
-- Vault personas readable (after **setup orchesto**): `workflows/global/persona-cpo.md`, `persona-architect.md`, `persona-implementor.md`, `persona-reviewer.md` (project overlays under `projects/<slug>/workflows/` win when present)
+- Vault personas readable (after **setup orchesto**): `workflows/global/persona-cpo.md`, `persona-architect.md`, `persona-implementor.md`, `persona-reviewer.md`, `persona-brainstormer.md` (project overlays under `projects/<slug>/workflows/` win when present)
 
 ## Artifacts
 
@@ -36,12 +36,24 @@ All under `.plans/<feature-slug>/` (create slug from the feature; ensure `.plans
 
 | File | Author |
 |------|--------|
+| `brainstorm.md` | brainstormer (optional — handoff only, after user proceed-yes) |
 | `prd.md` | CPO (optional — only if user says yes to PRD) |
 | `plan.md` | architect |
 | `validations.md` | architect |
 | `review-report.md` | reviewer (each round) |
 
 ## Pipeline
+
+### Optional: Brainstormer (user-invoked only)
+
+If the user asks to **brainstorm** / seat **brainstormer** / talk through an idea before CPO or architect:
+
+1. `read_note` `workflows/global/persona-brainstormer.md` (project overlay if present)
+2. Seat brainstormer (inject persona body) — **conversation** across turns; do not ticket-close
+3. Stay until the user proceeds or aborts (per persona)
+4. On proceed-yes → continue to **0. PRD gate** (if not already answered in-thread); on abort → stop
+
+**Do not** always-ask for brainstormer. **Do not** auto-seat it.
 
 ### 0. PRD gate (always ask)
 
@@ -91,10 +103,11 @@ A **round** = implementor applies review feedback → reviewer re-reviews.
 
 ### 5. Summary
 
-Short coordinator note: what shipped, whether CPO/PRD was used, validation status, rounds used, open follow-ups.
+Short coordinator note: what shipped, whether brainstormer/CPO/PRD was used, validation status, rounds used, open follow-ups.
 
 ## Do not
 
+- Always-ask for or auto-seat brainstormer
 - Skip the PRD ask, or seat CPO without a user yes
 - Start architect before PRD approval when the user opted into CPO
 - Skip plan/validation approval, validations, or the review report

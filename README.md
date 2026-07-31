@@ -26,7 +26,9 @@ Quote paths with spaces. Avoid iCloud/`Mobile Documents` if the editor sandbox r
 
 Then: open vault in Obsidian → restart editors → MCP `vault_info` → `readable: true`.
 
-**Orchesto:** in any product repo, ask the agent to **setup orchesto** — it should `read_note` vault `workflows/global/setup-orchesto.md`. See also [`templates/skills/orchesto/`](templates/skills/orchesto/). Orchesto always asks whether a **CPO / PRD** pass is needed before planning.
+**Orchesto:** in any product repo, ask the agent to **setup orchesto** — it should `read_note` vault `workflows/global/setup-orchesto.md`. See also [`templates/skills/orchesto/`](templates/skills/orchesto/). Orchesto always asks whether a **CPO / PRD** pass is needed before planning. Optional: ask to **brainstorm** first (conversation seat before CPO/architect).
+
+**Brainstormer:** ask the agent to **brainstorm** / seat **brainstormer** — it should `read_note` vault `workflows/global/persona-brainstormer.md`, stay in critical multi-turn conversation, and only on proceed write `.plans/<slug>/brainstorm.md` then continue Orchesto (standalone conversation seat; not a fixed pipeline step).
 
 **Auditor:** ask the agent to **audit** a repo or area — it should `read_note` vault `workflows/global/persona-auditor.md`, seat that persona, and write `.audits/<scope-slug>/report.md` (standalone; not part of Orchesto).
 

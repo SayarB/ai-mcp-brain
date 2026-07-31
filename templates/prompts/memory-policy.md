@@ -42,6 +42,10 @@ When the user asks to **plan** something: write/update a markdown file under **`
 
 When the user asks to **setup orchesto**: call MCP `read_note` on `workflows/global/setup-orchesto.md` and follow it. **Do not web-search.** Orchesto ≠ Orca/orca-cli.
 
+## Brainstormer (conversation persona)
+
+When the user asks to **brainstorm** / seat **brainstormer** / talk through an idea: `read_note` `workflows/global/persona-brainstormer.md` (project overlay if present), seat that persona, and stay in multi-turn critical conversation. Do not auto-seat. On proceed-yes: write `.plans/<slug>/brainstorm.md`, then continue Orchesto (PRD gate if unanswered). Brainstormer is **not** a fixed Orchesto pipeline step and is **not** CPO/architect.
+
 ## Audit (auditor persona)
 
 When the user asks to **audit** a repo/area (or to seat **auditor**): `read_note` `workflows/global/persona-auditor.md` (project overlay if present), seat that persona, and write `.audits/<scope-slug>/report.md`. Ensure `.audits/` is in that repo’s `.gitignore`. Auditor is **not** Orchesto and is **not** the PR reviewer — holistic findings, report-first.

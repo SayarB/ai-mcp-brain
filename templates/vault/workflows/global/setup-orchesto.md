@@ -25,6 +25,7 @@ These vault notes must exist (create from brain templates only if **missing** �
 - `workflows/global/persona-architect.md`
 - `workflows/global/persona-implementor.md`
 - `workflows/global/persona-reviewer.md`
+- `workflows/global/persona-brainstormer.md`
 
 If missing: copy from the ai-mcp-brain checkout that runs this MCP (`templates/vault/workflows/global/persona-*.md`). Discover that checkout via the MCP server working directory if needed. Prefer `read_note` on the paths above once present.
 
@@ -54,9 +55,12 @@ Tell the user:
 - Skill path(s) installed (Zed and/or Cursor as above — edit DAG per project there)
 - Personas: `workflows/global/persona-*.md` (per-repo overlays: `projects/<slug>/workflows/persona-*.md`)
 - Runtime: Orchesto **always asks** whether a PRD/CPO pass is needed before architect; CPO is optional
+- Optional: user may seat **brainstormer** (`persona-brainstormer`) for conversation before CPO/architect — not auto-run
 
 ## Day-to-day (after setup)
 
 The project skill runs optional CPO (PRD) → architect → plan + validations → implementor → reviewer (fix loop ≤ 3). User does not need to say “run orchesto.”
+
+Optional pre-step: user asks to **brainstorm** / seat **brainstormer** — conversation until they proceed, then the normal pipeline (PRD ask → …).
 
 Standalone `resolve_action` (e.g. `pr-review`) still works without this skill or any persona.

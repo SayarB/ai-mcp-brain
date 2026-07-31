@@ -82,7 +82,11 @@ Project `actions/registry.md` merges with global: project instruction/workflow r
 
 ### Orchesto (project skill)
 
-Orchesto personas (`persona-cpo` optional / `persona-architect` / `persona-implementor` / `persona-reviewer`) live under `workflows/global/` (optional project overlays). They are **not** actions. Setup playbook: `workflows/global/setup-orchesto.md`. The pipeline is a **project** skill installed via that playbook (Zed `.agents/skills/orchesto/`, Cursor `.cursor/skills/orchesto/`). Orchesto **always asks** whether a PRD / CPO pass is needed before architect; seat CPO only on user yes. Do not add an `orchesto` action.
+Orchesto personas (`persona-cpo` optional / `persona-architect` / `persona-implementor` / `persona-reviewer`) live under `workflows/global/` (optional project overlays). They are **not** actions. Setup playbook: `workflows/global/setup-orchesto.md`. The pipeline is a **project** skill installed via that playbook (Zed `.agents/skills/orchesto/`, Cursor `.cursor/skills/orchesto/`). Orchesto **always asks** whether a PRD / CPO pass is needed before architect; seat CPO only on user yes. Do not add an `orchesto` action. Optional pre-step: user may seat **brainstormer** before CPO/architect (not auto-run).
+
+### Brainstormer (standalone conversation persona)
+
+`persona-brainstormer` is **not** a fixed Orchesto pipeline step. When the user asks to brainstorm / seat brainstormer / talk through an idea: `read_note` `workflows/global/persona-brainstormer.md` (project overlay if present), seat it, and stay in **multi-turn conversation** (critical / objective tech-manager). Do not ticket-close. On proceed-yes: write `.plans/<slug>/brainstorm.md` handoff brief, then continue Orchesto (PRD gate if unanswered). No required artifact mid-conversation.
 
 ### Auditor (standalone persona)
 

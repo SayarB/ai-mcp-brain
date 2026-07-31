@@ -145,6 +145,7 @@ Skip any harness the user does not use.
 - Soft standing prefs → `upsert_guidance` `type=suggestion` (no magic words).
 - Do not fill binding instructions unless I explicitly ask for hard rules.
 - When asked to **setup orchesto**: `read_note` `workflows/global/setup-orchesto.md` (do not web-search; Orchesto ≠ Orca).
+- When asked to **brainstorm** / seat **brainstormer**: `read_note` `workflows/global/persona-brainstormer.md`, seat conversation persona; on proceed write `.plans/<slug>/brainstorm.md` then continue Orchesto. Not a fixed pipeline step / not CPO.
 - When asked to **audit** a repo/area: `read_note` `workflows/global/persona-auditor.md`, seat auditor, write `.audits/<scope-slug>/report.md` (ensure `.audits/` gitignored). Not Orchesto / not PR reviewer.
 
 ### Done criteria
