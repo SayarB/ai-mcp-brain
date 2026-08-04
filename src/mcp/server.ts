@@ -501,7 +501,7 @@ export function createBrainServer(): McpServer {
     {
       title: "Jira assigned issues",
       description:
-        "Fetch (or return cached) Jira issues for the configured account. Default JQL: assignee = currentUser() AND statusCategory != Done. Cache TTL 1h at work/cache/jira-assigned.json. Use refresh=true when the user says pull/get/refresh Jira. Optional — errors clearly if Jira env is unset. Does not modify work/today.md.",
+        "Fetch (or return cached) Jira issues. Default scope=sprint: assignee = me, not Done, in openSprints(). Use scope=all only when the user wants every assigned open issue (ask first — do not default to all). Cache TTL 1h; refresh=true busts cache. Optional jql overrides. Does not modify work/today.md.",
       inputSchema: {
         refresh: z
           .boolean()
@@ -511,11 +511,17 @@ export function createBrainServer(): McpServer {
           .string()
           .optional()
           .describe("Override JQL (always hits network)"),
+        scope: z
+          .enum(["sprint", "all"])
+          .optional()
+          .describe(
+            "sprint (default)=open sprints only; all=every assigned not-Done issue",
+          ),
       },
     },
-    async ({ refresh, jql }) => {
+    async ({ refresh, jql, scope }) => {
       try {
-        const result = await toolJiraAssigned({ refresh, jql });
+        const result = await toolJiraAssigned({ refresh, jql, scope });
         return textResult(JSON.stringify(result, null, 2));
       } catch (err) {
         return errorResult(err);
@@ -561,17 +567,23 @@ export function createBrainServer(): McpServer {
     {
       title: "Work plate compare",
       description:
-        "Compare Jira assigned snapshot (1h cache) vs work/today.md. Returns on_today / jira_only / today_only + counts. Never auto-adds to today. Refresh if cache stale or refresh=true. If Jira missing/fails, still returns today side.",
+        "Compare Jira snapshot vs work/today.md. Default scope=sprint (open sprints only). Use scope=all only after asking the user if they want every assigned issue. Returns on_today / jira_only / today_only + counts. Never auto-adds. refresh=true busts cache.",
       inputSchema: {
         refresh: z
           .boolean()
           .optional()
           .describe("Force Jira fetch even if cache is warm"),
+        scope: z
+          .enum(["sprint", "all"])
+          .optional()
+          .describe(
+            "sprint (default)=open sprints; all=all assigned not-Done (ask user first)",
+          ),
       },
     },
-    async ({ refresh }) => {
+    async ({ refresh, scope }) => {
       try {
-        const result = await toolWorkPlate({ refresh });
+        const result = await toolWorkPlate({ refresh, scope });
         return textResult(JSON.stringify(result, null, 2));
       } catch (err) {
         if (err instanceof JiraNotConfiguredError) {

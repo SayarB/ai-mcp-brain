@@ -82,10 +82,12 @@ Use MCP tools — do **not** raw-edit `work/today.md` on the happy path.
 
 | Phrase | Tool |
 |--------|------|
-| what’s on my plate | `work_plate` (1h Jira cache + today compare; no auto-add) |
+| what’s on my plate | `work_plate` (default **scope=sprint** — open sprints only) |
 | what’s left / todos for the day | `work_today` `op=list` (vault only — **no Jira**) |
-| pull / get / refresh Jira | `jira_assigned` `refresh=true` (or `work_plate` `refresh=true`) |
+| pull / get / refresh Jira | `jira_assigned` `refresh=true` (default sprint scope) |
 | add to today / handle today | `work_today` `op=add` |
 | yes to tick-off prompt | `work_today` `op=complete` |
+
+**Sprint vs all:** Default Jira fetch is **open sprints only** (`sprint in openSprints()`). If the user might want every assigned open issue, **ask first**, then call with `scope=all`. Do not silently fetch all assignments.
 
 When finished work likely matches an **open** today item: **ask yes/no** before completing. Never silent-tick. Never ambient Jira. Jira optional — if unconfigured, today tools still work.

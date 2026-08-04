@@ -10,6 +10,11 @@ import { isCacheFresh } from "./cache.ts";
 import { comparePlate } from "./plate.ts";
 import { parseEnvFile } from "../env.ts";
 import type { JiraCacheFile } from "./types.ts";
+import { jqlForScope } from "./tools.ts";
+import {
+  ALL_ASSIGNED_JIRA_JQL,
+  DEFAULT_JIRA_JQL,
+} from "./types.ts";
 
 describe("normalizeIssueKey", () => {
   it("uppercases and strips provider", () => {
@@ -123,8 +128,36 @@ EMPTY=
   });
 });
 
-describe("localDateString", () => {
-  it("formats", () => {
-    assert.match(localDateString(), /^\d{4}-\d{2}-\d{2}$/);
+import { jqlForScope } from "./tools.ts";
+import {
+  ALL_ASSIGNED_JIRA_JQL,
+  DEFAULT_JIRA_JQL,
+} from "./types.ts";
+
+describe("jqlForScope", () => {
+  it("defaults to open sprints", () => {
+    assert.equal(
+      jqlForScope(undefined, undefined, DEFAULT_JIRA_JQL),
+      DEFAULT_JIRA_JQL,
+    );
+    assert.match(DEFAULT_JIRA_JQL, /openSprints/);
+  });
+  it("scope=all uses all-assigned JQL", () => {
+    assert.equal(
+      jqlForScope("all", undefined, DEFAULT_JIRA_JQL),
+      ALL_ASSIGNED_JIRA_JQL,
+    );
+  });
+  it("explicit jql wins", () => {
+    assert.equal(
+      jqlForScope("all", "project = X", DEFAULT_JIRA_JQL),
+      "project = X",
+    );
+  });
+  it("legacy all-assigned config still sprint-defaults", () => {
+    assert.equal(
+      jqlForScope("sprint", undefined, ALL_ASSIGNED_JIRA_JQL),
+      DEFAULT_JIRA_JQL,
+    );
   });
 });
