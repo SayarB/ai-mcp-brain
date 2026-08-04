@@ -7,7 +7,10 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { listActions, resolveAction } from "../actions.ts";
-import { loadConfig, resolveVaultPath } from "../config.ts";
+import { configDir, loadConfig, resolveVaultPath } from "../config.ts";
+import { loadEnvFile } from "../env.ts";
+import { JiraNotConfiguredError } from "../jira/client.ts";
+import { join } from "node:path";
 import {
   getProjectContext,
   listGuidance,
@@ -21,6 +24,11 @@ import {
   upsertGuidance,
   vaultInfo,
 } from "../vault.ts";
+import {
+  toolJiraAssigned,
+  toolWorkPlate,
+  toolWorkToday,
+} from "../work/tools.ts";
 
 function textResult(text: string) {
   return { content: [{ type: "text" as const, text }] };
@@ -488,10 +496,97 @@ export function createBrainServer(): McpServer {
     },
   );
 
+  server.registerTool(
+    "jira_assigned",
+    {
+      title: "Jira assigned issues",
+      description:
+        "Fetch (or return cached) Jira issues for the configured account. Default JQL: assignee = currentUser() AND statusCategory != Done. Cache TTL 1h at work/cache/jira-assigned.json. Use refresh=true when the user says pull/get/refresh Jira. Optional — errors clearly if Jira env is unset. Does not modify work/today.md.",
+      inputSchema: {
+        refresh: z
+          .boolean()
+          .optional()
+          .describe("Bust cache and hit Jira (default false)"),
+        jql: z
+          .string()
+          .optional()
+          .describe("Override JQL (always hits network)"),
+      },
+    },
+    async ({ refresh, jql }) => {
+      try {
+        const result = await toolJiraAssigned({ refresh, jql });
+        return textResult(JSON.stringify(result, null, 2));
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  );
+
+  server.registerTool(
+    "work_today",
+    {
+      title: "Today work list",
+      description:
+        "Vault-only today list at work/today.md. op=list (rollover if needed), add (promote to today), complete (tick off after user yes). Never calls Jira. Prefer this over raw Read/Write of today.md.",
+      inputSchema: {
+        op: z.enum(["list", "add", "complete"]).describe("Operation"),
+        key: z
+          .string()
+          .optional()
+          .describe("Issue key e.g. AD-206 or jira:AD-206"),
+        text: z
+          .string()
+          .optional()
+          .describe("Free-text item or match string for complete"),
+        note: z.string().optional().describe("Note when adding"),
+        log: z
+          .string()
+          .optional()
+          .describe("Optional day-log line when completing"),
+      },
+    },
+    async ({ op, key, text, note, log }) => {
+      try {
+        const result = await toolWorkToday({ op, key, text, note, log });
+        return textResult(JSON.stringify(result, null, 2));
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  );
+
+  server.registerTool(
+    "work_plate",
+    {
+      title: "Work plate compare",
+      description:
+        "Compare Jira assigned snapshot (1h cache) vs work/today.md. Returns on_today / jira_only / today_only + counts. Never auto-adds to today. Refresh if cache stale or refresh=true. If Jira missing/fails, still returns today side.",
+      inputSchema: {
+        refresh: z
+          .boolean()
+          .optional()
+          .describe("Force Jira fetch even if cache is warm"),
+      },
+    },
+    async ({ refresh }) => {
+      try {
+        const result = await toolWorkPlate({ refresh });
+        return textResult(JSON.stringify(result, null, 2));
+      } catch (err) {
+        if (err instanceof JiraNotConfiguredError) {
+          return errorResult(err);
+        }
+        return errorResult(err);
+      }
+    },
+  );
+
   return server;
 }
 
 async function main(): Promise<void> {
+  await loadEnvFile(join(configDir(), ".env"));
   const vault = await resolveVault();
   const info = await vaultInfo(vault);
   if (!info.readable) {

@@ -8,7 +8,10 @@
       ],
       "cwd": "<absolute-path-to-repo>",
       "env": {
-        "BRAIN_VAULT": "<absolute-vault-path>"
+        "BRAIN_VAULT": "<absolute-vault-path>",
+        "JIRA_BASE_URL": "<optional-https://your-domain.atlassian.net>",
+        "JIRA_EMAIL": "<optional>",
+        "JIRA_API_TOKEN": "<optional-prefer-.env-instead>"
       }
     }
   }

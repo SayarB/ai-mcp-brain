@@ -3,7 +3,8 @@
  * Single portable entrypoint: create vault + inject harness MCP/rules.
  * Prefer this over separate init/inject when installing.
  */
-import { writeConfig, resolveVaultPath, loadConfig } from "./config.ts";
+import { writeConfig, resolveVaultPath, loadConfig, configDir } from "./config.ts";
+import { copyEnvExampleIfMissing } from "./env.ts";
 import { formatInitReport, initVault } from "./init.ts";
 import {
   formatInjectReport,
@@ -69,15 +70,30 @@ export async function runSetup(opts?: {
   const { actions } = await injectHarnesses(target);
   console.log(formatInjectReport(vaultPath, actions));
 
+  const jiraConfigured = Boolean(
+    process.env.JIRA_BASE_URL?.trim() &&
+      process.env.JIRA_EMAIL?.trim() &&
+      process.env.JIRA_API_TOKEN?.trim(),
+  );
+  console.log(
+    `[setup] Jira: ${jiraConfigured ? "configured (env present)" : "not configured (optional — see .env.example)"}`,
+  );
+
+  const copied = await copyEnvExampleIfMissing(configDir());
+  if (copied) {
+    console.log(`[setup] created .env from .env.example — fill Jira vars if desired`);
+  }
+
   console.log(`
 [setup] done.
 
 Next:
   1. Open the vault folder in Obsidian (optional but recommended)
-  2. Restart Cursor / Claude / Codex / Zed so MCP reloads
-  3. Call MCP tool vault_info — expect readable: true
-  4. Soft prefs auto-log to suggestions/; binding rules go in instructions/ only when you mean hard process
-  5. In this repo: git config core.hooksPath .githooks  (post-push restarts local MCP)
+  2. Optional work desk: copy .env.example → .env, set JIRA_* , restart MCP
+  3. Restart Cursor / Claude / Codex / Zed so MCP reloads
+  4. Call MCP tool vault_info — expect readable: true
+  5. Soft prefs auto-log to suggestions/; binding rules go in instructions/ only when you mean hard process
+  6. In this repo: git config core.hooksPath .githooks  (post-push restarts local MCP)
 `);
 }
 

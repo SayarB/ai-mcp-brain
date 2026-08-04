@@ -2,7 +2,7 @@
 
 Vault: `{{VAULT_PATH}}`
 
-MCP: `resolve_action` · `list_actions` · `resolve_guidance` · `list_guidance` · `upsert_guidance` · `search_notes` · `read_note` · `remember` · `get_project_context` · `list_recent` · `track_tool` · `vault_info`
+MCP: `resolve_action` · `list_actions` · `resolve_guidance` · `list_guidance` · `upsert_guidance` · `search_notes` · `read_note` · `remember` · `get_project_context` · `list_recent` · `track_tool` · `vault_info` · `jira_assigned` · `work_today` · `work_plate`
 
 Full policy: repo `templates/prompts/agent-memory.md`.
 
@@ -74,4 +74,18 @@ Secrets, ephemeral debug, one-off chatter, unverified guesses; do not invent bin
 
 ## Folders
 
-`actions/` · `instructions/` · `suggestions/` · `workflows/` · `inbox/` · `external/` · `projects/<slug>/` · `patterns/` · `stack/` · `media/` · `agents/`
+`actions/` · `instructions/` · `suggestions/` · `workflows/` · `inbox/` · `external/` · `projects/<slug>/` · `patterns/` · `stack/` · `media/` · `agents/` · `work/`
+
+## Work desk (optional Jira)
+
+Use MCP tools — do **not** raw-edit `work/today.md` on the happy path.
+
+| Phrase | Tool |
+|--------|------|
+| what’s on my plate | `work_plate` (1h Jira cache + today compare; no auto-add) |
+| what’s left / todos for the day | `work_today` `op=list` (vault only — **no Jira**) |
+| pull / get / refresh Jira | `jira_assigned` `refresh=true` (or `work_plate` `refresh=true`) |
+| add to today / handle today | `work_today` `op=add` |
+| yes to tick-off prompt | `work_today` `op=complete` |
+
+When finished work likely matches an **open** today item: **ask yes/no** before completing. Never silent-tick. Never ambient Jira. Jira optional — if unconfigured, today tools still work.

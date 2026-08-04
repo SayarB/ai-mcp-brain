@@ -129,13 +129,18 @@ export type McpLaunch = {
 
 /**
  * Prefer Bun when available; otherwise Node + local tsx.
+ * Passes through optional JIRA_* when already set in the parent environment.
  */
 export function resolveMcpLaunch(
   repoRoot: string,
   serverScript: string,
   vaultPath: string,
 ): McpLaunch {
-  const env = { BRAIN_VAULT: vaultPath };
+  const env: Record<string, string> = { BRAIN_VAULT: vaultPath };
+  for (const k of ["JIRA_BASE_URL", "JIRA_EMAIL", "JIRA_API_TOKEN"] as const) {
+    const v = process.env[k]?.trim();
+    if (v) env[k] = v;
+  }
   const bun =
     whichSync("bun") ||
     whichSync("bun.exe") ||

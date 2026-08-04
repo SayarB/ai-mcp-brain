@@ -10,7 +10,9 @@
     "setup": "tsx src/setup.ts",
     "brain": "tsx src/cli.ts",
     "mcp": "tsx src/mcp/server.ts",
-    "restart-mcp": "bash scripts/restart-mcp.sh"
+    "restart-mcp": "bash scripts/restart-mcp.sh",
+    "test": "tsx --test src/**/*.test.ts",
+    "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
     "@types/bun": "latest",

@@ -54,7 +54,7 @@ Copy everything under `templates/vault/` into the vault root:
 - Create missing directories and files.
 - **Never overwrite** a file that already exists.
 - Ensure dirs exist (must match `REQUIRED_VAULT_DIRS` in `src/vault-layout.ts`):
-  `inbox`, `external`, `projects`, `patterns`, `stack`, `stack/catalog`, `media`, `agents`, `instructions`, `instructions/global`, `suggestions`, `suggestions/global`, `workflows`, `workflows/global`, `actions`, `_meta`.
+  `inbox`, `external`, `projects`, `patterns`, `stack`, `stack/catalog`, `media`, `agents`, `instructions`, `instructions/global`, `suggestions`, `suggestions/global`, `workflows`, `workflows/global`, `actions`, `_meta`, `work`, `work/cache`, `work/log`.
 
 Prefer the scripted path when available:
 
@@ -72,9 +72,15 @@ Write repo `config.toml` (gitignored) with:
 
 ```toml
 vault_path = "<absolute-or-~/vault-path>"
+
+# Optional Jira work desk (secrets live in gitignored `.env` — see `.env.example`)
+# [jira]
+# base_url = "https://your-domain.atlassian.net"
+# email_env = "JIRA_EMAIL"
+# token_env = "JIRA_API_TOKEN"
 ```
 
-See `config.example.toml`.
+See `config.example.toml`. Setup copies `.env.example` → `.env` if missing (fill optional `JIRA_*`). MCP loads `.env` at startup. Jira is **optional** — today list tools work without it.
 
 #### D. MCP server entry (all harnesses)
 
@@ -93,7 +99,8 @@ Prefer Bun when available; otherwise Node + local `tsx`. Absolute paths:
 Common for both:
 
 - cwd: `<repo>`
-- env: `{ "BRAIN_VAULT": "<absolute-vault-path>" }`
+- env: `{ "BRAIN_VAULT": "<absolute-vault-path>", /* optional: JIRA_BASE_URL, JIRA_EMAIL, JIRA_API_TOKEN */ }`
+- Prefer putting Jira secrets in repo `.env` (loaded by MCP); inject may pass through `JIRA_*` when already set in the parent env at setup time.
 
 (Or run `npm run setup` / `bun run setup`, which picks Bun vs Node automatically via `resolveMcpLaunch` in `src/runtime.ts`.)
 
@@ -129,7 +136,7 @@ Skip any harness the user does not use.
 
 #### F. Verify
 
-- List vault top-level folders (include `suggestions/`, `instructions/`, `actions/`, `workflows/`).
+- List vault top-level folders (include `suggestions/`, `instructions/`, `actions/`, `workflows/`, `work/`).
 - Confirm `actions/registry.md` exists.
 - Confirm empty-ish shells for kinds `coding`, `pr-review`, `commit`, `git` under both:
   - `instructions/global/<kind>.md`
@@ -137,7 +144,7 @@ Skip any harness the user does not use.
 - Confirm MCP config uses absolute paths + `BRAIN_VAULT`.
 - Tell me to restart editors and run MCP tool `vault_info` → expect `readable: true`.
 - Optional: `resolve_action` with `action=coding` should return instructions + a soft-suggestions section (bodies may be empty on a fresh install).
-
+- Optional work desk: with `.env` Jira filled, `jira_assigned` / `work_plate` work; without Jira, `work_today` still lists/adds/completes.
 ### Policy reminders to leave in place
 
 - `resolve_action` on **mode start only** (not every turn). Reuse an earlier same-action bundle already in this chat; re-resolve only on mode switch / reload / missing bundle.
@@ -190,7 +197,7 @@ When you change **how install works** on a new machine, update **all** of the fo
 | [`templates/prompts/memory-policy.md`](templates/prompts/memory-policy.md) | Injected slim policy |
 | [`package.json`](package.json) scripts | `setup` / `brain` / `mcp` / `restart-mcp` entrypoints |
 | [`.githooks/post-push`](.githooks/post-push) + [`scripts/restart-mcp.sh`](scripts/restart-mcp.sh) | After push, kill local MCP so the harness respawns with new schemas (`git config core.hooksPath .githooks`) |
-| [`config.example.toml`](config.example.toml), [`mcp.cursor.example.json`](mcp.cursor.example.json) | Portable examples (placeholders) |
+| [`config.example.toml`](config.example.toml), [`mcp.cursor.example.json`](mcp.cursor.example.json), [`.env.example`](.env.example) | Portable examples (placeholders; no secrets) |
 | [`README.md`](README.md) install blurb | Points here |
 
 After install-path edits: reinject locally (`npm run brain -- inject --target all`) and sanity-check that a **clean** vault path + Node-only (or Bun-only) launch still matches this document.

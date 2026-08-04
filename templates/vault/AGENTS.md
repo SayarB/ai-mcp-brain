@@ -24,6 +24,8 @@ This Obsidian vault is the source of truth for durable work memory.
 | Distilled talk takeaways | `media/` |
 | Agent/orchestrator learnings | `agents/` |
 | Schema / indexes | `_meta/` |
+| Daily focus + work logs | `work/today.md`, `work/log/` (prefer MCP `work_*` tools) |
+| Machine Jira cache | `work/cache/` (do not edit) |
 
 ## Guidance first
 

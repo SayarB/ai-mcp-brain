@@ -186,7 +186,9 @@ async function injectCodexMcp(
     `args = [${launch.args.map((a) => JSON.stringify(a)).join(", ")}]`,
     `cwd = ${JSON.stringify(launch.cwd)}`,
     "[mcp_servers.ai-mcp-brain.env]",
-    `BRAIN_VAULT = ${JSON.stringify(launch.env.BRAIN_VAULT)}`,
+    ...Object.entries(launch.env).map(
+      ([k, v]) => `${k} = ${JSON.stringify(v)}`,
+    ),
     CODEX_MCP_END,
   ].join("\n");
 
@@ -197,11 +199,12 @@ async function injectCodexMcp(
     CODEX_MCP_END,
   );
   const action = await writeFileEnsured(configPath, next);
+  const envKeys = Object.keys(launch.env).join(", ");
   return {
     target: "codex-mcp",
     path: configPath,
     action: updated ? "updated" : action,
-    detail: `mcp_servers.ai-mcp-brain (+ cwd, BRAIN_VAULT, ${launch.runtime})`,
+    detail: `mcp_servers.ai-mcp-brain (+ cwd, env: ${envKeys}, ${launch.runtime})`,
   };
 }
 

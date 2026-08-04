@@ -19,6 +19,9 @@ export const REQUIRED_VAULT_DIRS = [
   "workflows/global",
   "actions",
   "_meta",
+  "work",
+  "work/cache",
+  "work/log",
 ] as const;
 
 /** Seeded guidance kinds (empty shells under instructions/ and suggestions/). */

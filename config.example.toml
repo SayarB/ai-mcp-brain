@@ -6,3 +6,10 @@ vault_path = "~/Obsidian/My Brain"
 
 # [inject] paths are optional — OS defaults are applied in code for
 # Cursor, Claude, Codex, and Zed (including Windows AppData for Zed).
+
+# Optional Jira work desk. Secrets stay in gitignored `.env` (see `.env.example`).
+# [jira]
+# base_url = "https://your-domain.atlassian.net"
+# email_env = "JIRA_EMAIL"
+# token_env = "JIRA_API_TOKEN"
+# default_jql = "assignee = currentUser() AND statusCategory != Done"
