@@ -7,3 +7,4 @@ dist/
 .cursor/mcp.json
 .plans/
 .audits/
+.vercel
