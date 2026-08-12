@@ -1,0 +1,151 @@
+@import url("https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,500;9..144,650;9..144,700&display=swap");
+@import "tailwindcss";
+
+@theme {
+  --font-display: "Fraunces", Georgia, serif;
+  --font-sans: "Figtree", ui-sans-serif, sans-serif;
+
+  --color-ink: #1a1f1c;
+  --color-paper: #f3efe6;
+  --color-paper-deep: #e8e2d4;
+  --color-accent: #2f6f68;
+  --color-accent-hover: #245851;
+  --color-on-accent: #f7f4ec;
+  --color-muted: #5c635e;
+  --color-line: #c9c2b2;
+  --color-shelf: #d4cdc0;
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-paper text-ink font-sans antialiased;
+    background-image:
+      radial-gradient(ellipse 120% 80% at 10% -10%, rgba(47, 111, 104, 0.08), transparent 55%),
+      radial-gradient(ellipse 90% 60% at 100% 0%, rgba(26, 31, 28, 0.05), transparent 50%),
+      linear-gradient(180deg, var(--color-paper) 0%, var(--color-paper-deep) 100%);
+    background-attachment: fixed;
+    min-height: 100vh;
+  }
+
+  ::selection {
+    background: color-mix(in srgb, var(--color-accent) 28%, transparent);
+  }
+
+  a {
+    @apply underline-offset-4;
+  }
+
+  :focus-visible {
+    @apply outline-2 outline-offset-3 outline-accent;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply inline-flex min-h-11 cursor-pointer items-center justify-center bg-accent px-5 text-[0.95rem] font-semibold text-on-accent no-underline transition-colors duration-200 hover:bg-accent-hover;
+  }
+
+  .btn-ghost {
+    @apply inline-flex min-h-11 cursor-pointer items-center justify-center border border-line bg-transparent px-5 text-[0.95rem] font-semibold text-ink no-underline transition-colors duration-200 hover:border-accent hover:text-accent;
+  }
+
+  .section-label {
+    @apply font-display text-sm font-medium tracking-[0.08em] text-accent uppercase;
+  }
+
+  .prose-docs {
+    @apply max-w-none text-[1.05rem] leading-relaxed text-ink;
+  }
+
+  .prose-docs h1 {
+    @apply font-display mt-0 mb-6 text-4xl font-semibold tracking-tight text-ink;
+  }
+
+  .prose-docs h2 {
+    @apply font-display mt-12 mb-4 text-2xl font-semibold text-ink;
+  }
+
+  .prose-docs h3 {
+    @apply font-display mt-8 mb-3 text-xl font-semibold text-ink;
+  }
+
+  .prose-docs p,
+  .prose-docs ul,
+  .prose-docs ol {
+    @apply mb-4 text-ink/90;
+  }
+
+  .prose-docs ul {
+    @apply list-disc pl-6;
+  }
+
+  .prose-docs ol {
+    @apply list-decimal pl-6;
+  }
+
+  .prose-docs a {
+    @apply text-accent underline hover:text-accent-hover;
+  }
+
+  .prose-docs code {
+    @apply rounded-sm bg-paper-deep px-1.5 py-0.5 font-mono text-[0.88em] text-ink;
+  }
+
+  .prose-docs pre {
+    @apply mb-6 overflow-x-auto border border-line bg-ink px-4 py-4 text-sm text-paper;
+  }
+
+  .prose-docs pre code {
+    @apply bg-transparent p-0 text-inherit;
+  }
+
+  .prose-docs table {
+    @apply mb-6 w-full border-collapse text-left text-[0.95rem];
+  }
+
+  .prose-docs th,
+  .prose-docs td {
+    @apply border border-line px-3 py-2 align-top;
+  }
+
+  .prose-docs th {
+    @apply bg-paper-deep font-semibold;
+  }
+
+  .prose-docs blockquote {
+    @apply mb-6 border-l-4 border-accent pl-4 text-muted italic;
+  }
+
+  .prose-docs hr {
+    @apply my-10 border-line;
+  }
+
+  .reveal {
+    opacity: 0;
+    transform: translateY(14px);
+    transition:
+      opacity 0.4s cubic-bezier(0.16, 1, 0.3, 1),
+      transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .reveal.is-visible {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .reveal {
+      opacity: 1;
+      transform: none;
+      transition: none;
+    }
+
+    html {
+      scroll-behavior: auto;
+    }
+  }
+}

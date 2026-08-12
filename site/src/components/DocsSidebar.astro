@@ -1,0 +1,44 @@
+---
+import type { DocPage } from "../lib/docs";
+import { navGroups } from "../lib/docs";
+
+interface Props {
+  pages: DocPage[];
+  currentHref: string;
+}
+
+const { pages, currentHref } = Astro.props;
+const groups = navGroups(pages);
+---
+
+<aside class="docs-sidebar shrink-0 border-line md:w-60 md:border-r lg:w-64">
+  <nav class="sticky top-0 max-h-[100dvh] overflow-y-auto px-5 py-8 md:px-6" aria-label="Documentation">
+    {
+      groups.map((group) =>
+        group.items.length ? (
+          <div class="mb-8">
+            <p class="section-label mb-3">{group.label}</p>
+            <ul class="space-y-1">
+              {group.items.map((item) => (
+                <li>
+                  <a
+                    href={item.href}
+                    class:list={[
+                      "block rounded-sm px-2 py-2 text-sm no-underline transition-colors",
+                      item.href === currentHref
+                        ? "bg-paper-deep font-semibold text-accent"
+                        : "text-ink/80 hover:bg-paper-deep/70 hover:text-accent",
+                    ]}
+                    aria-current={item.href === currentHref ? "page" : undefined}
+                  >
+                    {item.title}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null,
+      )
+    }
+  </nav>
+</aside>

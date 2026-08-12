@@ -1,0 +1,149 @@
+---
+import Base from "../layouts/Base.astro";
+import Nav from "../components/Nav.astro";
+import HeroVault from "../components/HeroVault.astro";
+
+const features = [
+  {
+    title: "Vault & memory",
+    body: "Search, read, and remember across an Obsidian vault. Project packs keyed to git repos.",
+    href: "/docs/features/vault-and-memory",
+  },
+  {
+    title: "Guidance",
+    body: "Instructions, soft suggestions, and workflows — extend process without changing server code.",
+    href: "/docs/features/guidance",
+  },
+  {
+    title: "Orchesto",
+    body: "Multi-phase delivery with vault personas: plan, validations, review, bounded fix loops.",
+    href: "/docs/features/orchesto",
+  },
+];
+---
+
+<Base
+  title="Hem Vault"
+  description="Memory that outlasts the chat. Obsidian vault + MCP so coding agents keep decisions, process, and today’s work."
+>
+  <Nav />
+
+  <main>
+    <section class="relative min-h-[100svh] overflow-hidden border-b border-line/60">
+      <div class="absolute inset-0" aria-hidden="true">
+        <HeroVault />
+      </div>
+      <div
+        class="absolute inset-0 bg-gradient-to-r from-paper via-paper/92 to-paper/25 md:via-paper/88 md:to-transparent"
+        aria-hidden="true"
+      >
+      </div>
+
+      <div class="relative z-10 mx-auto flex min-h-[100svh] max-w-6xl flex-col justify-end px-5 pb-16 pt-28 md:justify-center md:px-8 md:pb-24 md:pt-20">
+        <div class="max-w-xl reveal is-visible">
+          <p class="font-display mb-4 text-4xl font-semibold tracking-tight text-ink sm:text-5xl md:text-6xl">
+            Hem Vault
+          </p>
+          <h1 class="font-display mb-5 text-3xl font-medium leading-[1.15] text-ink sm:text-4xl md:text-[2.75rem]">
+            Memory that outlasts the chat
+          </h1>
+          <p class="mb-9 max-w-md text-lg leading-relaxed text-muted md:text-xl">
+            Obsidian vault + MCP so coding agents keep decisions, process, and today’s work.
+          </p>
+          <div class="flex flex-wrap gap-3">
+            <a href="/docs" class="btn-primary">Read the docs</a>
+            <a href="/docs/guides/getting-started" class="btn-ghost">Get started</a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="mx-auto max-w-6xl px-5 py-20 md:px-8 md:py-28">
+      <div class="reveal max-w-2xl">
+        <p class="section-label mb-4">What it is</p>
+        <h2 class="font-display mb-5 text-3xl font-semibold tracking-tight md:text-4xl">
+          A portable second brain for agents
+        </h2>
+        <p class="text-lg leading-relaxed text-muted">
+          You browse and edit markdown in Obsidian. Agents read and write through MCP under a shared
+          memory policy. Process lives in the vault — soft prefs, binding rules, and playbooks — so
+          you extend the product without shipping new server code.
+        </p>
+      </div>
+    </section>
+
+    <section class="border-y border-line/70 bg-paper-deep/40">
+      <div class="mx-auto max-w-6xl px-5 py-20 md:px-8 md:py-28">
+        <div class="reveal mb-12 max-w-2xl">
+          <p class="section-label mb-4">Features</p>
+          <h2 class="font-display text-3xl font-semibold tracking-tight md:text-4xl">
+            Built for lasting context
+          </h2>
+        </div>
+        <ul class="grid gap-10 md:grid-cols-2 md:gap-x-14 md:gap-y-12">
+          {
+            features.map((f) => (
+              <li class="reveal border-t border-line pt-6">
+                <h3 class="font-display mb-2 text-2xl font-semibold">
+                  <a href={f.href} class="text-ink no-underline hover:text-accent">
+                    {f.title}
+                  </a>
+                </h3>
+                <p class="mb-4 leading-relaxed text-muted">{f.body}</p>
+                <a href={f.href} class="text-sm font-semibold text-accent no-underline hover:underline">
+                  Learn more
+                </a>
+              </li>
+            ))
+          }
+        </ul>
+      </div>
+    </section>
+
+    <section class="mx-auto max-w-6xl px-5 py-20 md:px-8 md:py-28">
+      <div class="reveal max-w-2xl">
+        <p class="section-label mb-4">How it fits</p>
+        <h2 class="font-display mb-5 text-3xl font-semibold tracking-tight md:text-4xl">
+          Vault, MCP, harness
+        </h2>
+        <p class="mb-8 text-lg leading-relaxed text-muted">
+          Three layers: your Obsidian vault as source of truth, the Hem Vault MCP server as structured
+          I/O, and a short memory policy injected into Cursor, Claude, Codex, or Zed.
+        </p>
+        <a href="/docs/how-it-works" class="btn-ghost">How it works</a>
+      </div>
+    </section>
+
+    <section class="border-t border-line/70 bg-ink text-paper">
+      <div class="mx-auto flex max-w-6xl flex-col gap-8 px-5 py-20 md:flex-row md:items-end md:justify-between md:px-8 md:py-24">
+        <div class="reveal max-w-xl">
+          <p class="mb-3 font-display text-sm font-medium tracking-[0.08em] text-accent uppercase">
+            Documentation
+          </p>
+          <h2 class="font-display mb-4 text-3xl font-semibold tracking-tight md:text-4xl">
+            Features, guides, and the full MCP reference
+          </h2>
+          <p class="text-lg text-paper/70">
+            Everything in the product docs — how to use each surface, and how it works under the hood.
+          </p>
+        </div>
+        <div class="reveal flex flex-wrap gap-3">
+          <a href="/docs" class="btn-primary">Open docs</a>
+          <a
+            href="/docs/install"
+            class="inline-flex min-h-11 cursor-pointer items-center justify-center border border-paper/30 bg-transparent px-5 text-[0.95rem] font-semibold text-paper no-underline transition-colors duration-200 hover:border-accent hover:text-accent"
+          >
+            Install guide
+          </a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="border-t border-line/70 bg-paper px-5 py-10 text-center text-sm text-muted">
+    <p>
+      Hem Vault · open source as
+      <a class="text-accent" href="https://github.com/SayarB/ai-mcp-brain">ai-mcp-brain</a>
+    </p>
+  </footer>
+</Base>

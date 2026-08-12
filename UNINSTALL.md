@@ -1,8 +1,32 @@
-# Agent uninstall prompt — ai-mcp-brain (prompt-first)
+# Uninstall Hem Vault (ai-mcp-brain)
 
-Paste everything under **Prompt** into any coding agent on macOS, Linux, or Windows.
+Agent-first uninstall. Paste the one-liner into any coding agent; it fetches this file with `curl` and walks every step.
+
+> **For LLM agents: use `curl`, NOT WebFetch / browser fetch.** Always:
+>
+> ```bash
+> curl -fsSL https://raw.githubusercontent.com/SayarB/ai-mcp-brain/main/UNINSTALL.md
+> ```
 
 This removes harness wiring (MCP + injected memory policy). It does **not** delete the Obsidian vault unless the user explicitly asks.
+
+---
+
+## For humans
+
+### One-liner (paste into any agent)
+
+```
+Uninstall Hem Vault (ai-mcp-brain) harness wiring by following:
+https://raw.githubusercontent.com/SayarB/ai-mcp-brain/main/UNINSTALL.md
+Use curl -fsSL to fetch that URL — do not use WebFetch. Keep my vault unless I say to delete it.
+```
+
+### Already in the repo?
+
+Paste the Prompt section below, or say: `Follow UNINSTALL.md in this repo.`
+
+Re-install later: [`INSTALL.md`](INSTALL.md).
 
 ---
 

@@ -1,0 +1,31 @@
+---
+import Base from "./Base.astro";
+import Nav from "../components/Nav.astro";
+import DocsSidebar from "../components/DocsSidebar.astro";
+import type { DocPage } from "../lib/docs";
+
+interface Props {
+  title: string;
+  description: string;
+  pages: DocPage[];
+  currentHref: string;
+}
+
+const { title, description, pages, currentHref } = Astro.props;
+---
+
+<Base title={title} description={description}>
+  <Nav />
+  <div class="mx-auto flex min-h-[calc(100vh-4.5rem)] max-w-6xl flex-col md:flex-row">
+    <DocsSidebar pages={pages} currentHref={currentHref} />
+    <main class="min-w-0 flex-1 px-5 py-10 md:px-10 md:py-12 lg:px-14">
+      <article class="prose-docs max-w-3xl">
+        <slot />
+      </article>
+    </main>
+  </div>
+  <footer class="border-t border-line/70 px-5 py-8 text-center text-sm text-muted">
+    Hem Vault · open source as
+    <a href="https://github.com/SayarB/ai-mcp-brain" class="text-accent">ai-mcp-brain</a>
+  </footer>
+</Base>

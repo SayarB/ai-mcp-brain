@@ -1,0 +1,17 @@
+---
+import DocsLayout from "../../layouts/DocsLayout.astro";
+import { getAllDocs, getDocBySlug } from "../../lib/docs";
+
+const pages = await getAllDocs();
+const doc = await getDocBySlug("index");
+if (!doc) throw new Error("docs/README.md missing");
+---
+
+<DocsLayout
+  title="Docs"
+  description={doc.description}
+  pages={pages}
+  currentHref="/docs"
+>
+  <div set:html={doc.html} />
+</DocsLayout>

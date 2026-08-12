@@ -1,0 +1,53 @@
+---
+interface Props {
+  title?: string;
+  description?: string;
+}
+
+import "../styles/global.css";
+
+const {
+  title = "Hem Vault",
+  description = "Memory that outlasts the chat. Obsidian vault + MCP for coding agents.",
+} = Astro.props;
+
+const pageTitle = title === "Hem Vault" ? title : `${title} · Hem Vault`;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content={description} />
+    <meta name="generator" content={Astro.generator} />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>{pageTitle}</title>
+  </head>
+  <body>
+    <slot />
+    <script>
+      const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      if (!reduce) {
+        const nodes = document.querySelectorAll(".reveal");
+        const io = new IntersectionObserver(
+          (entries) => {
+            for (const entry of entries) {
+              if (entry.isIntersecting) {
+                entry.target.classList.add("is-visible");
+                io.unobserve(entry.target);
+              }
+            }
+          },
+          { rootMargin: "0px 0px -8% 0px", threshold: 0.12 },
+        );
+        nodes.forEach((n, i) => {
+          (n as HTMLElement).style.transitionDelay = `${Math.min(i % 6, 5) * 60}ms`;
+          io.observe(n);
+        });
+      } else {
+        document.querySelectorAll(".reveal").forEach((n) => n.classList.add("is-visible"));
+      }
+    </script>
+  </body>
+</html>

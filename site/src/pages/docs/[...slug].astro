@@ -1,0 +1,25 @@
+---
+import DocsLayout from "../../layouts/DocsLayout.astro";
+import { getAllDocs } from "../../lib/docs";
+
+export async function getStaticPaths() {
+  const pages = await getAllDocs();
+  return pages
+    .filter((p) => p.slug !== "index")
+    .map((page) => ({
+      params: { slug: page.slug },
+      props: { page, pages },
+    }));
+}
+
+const { page, pages } = Astro.props;
+---
+
+<DocsLayout
+  title={page.title}
+  description={page.description}
+  pages={pages}
+  currentHref={page.href}
+>
+  <div set:html={page.html} />
+</DocsLayout>

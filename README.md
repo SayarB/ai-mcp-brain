@@ -1,18 +1,30 @@
 # ai-mcp-brain
 
-Portable second brain: Obsidian markdown vault + MCP for Cursor, Claude, Codex, and Zed.
+**Hem Vault** — portable second brain: Obsidian markdown vault + MCP for Cursor, Claude, Codex, and Zed.
 
-## Install (preferred): agent prompt
+**Website / docs:** [`site/`](site/README.md) (Astro). Source markdown: [`docs/`](docs/README.md).
 
-Paste [`INSTALL.md`](INSTALL.md) into any agent. It installs by copying `templates/vault/` and writing harness MCP/rules — **no OS-specific install scripts required**.
+```bash
+cd site && npm install && npm run dev
+```
 
-You need a JS runtime so the MCP server can run: **Bun (preferred)** or **Node.js 20+** (MCP launches via local `tsx`). See [`INSTALL.md`](INSTALL.md).
+## Install (preferred): agent one-liner
+
+No OS shell installer — [`INSTALL.md`](INSTALL.md) *is* the install script. Paste into any coding agent:
+
+```
+Install Hem Vault (ai-mcp-brain) by following the instructions at:
+https://raw.githubusercontent.com/SayarB/ai-mcp-brain/main/INSTALL.md
+Use curl -fsSL to fetch that URL — do not use WebFetch.
+```
+
+The agent clones (if needed), copies `templates/vault/`, and wires MCP/rules. Runtime: **Bun (preferred)** or **Node.js 20+** (local `tsx`).
 
 **If you change how install works**, update `INSTALL.md` and the install scripts (`setup` / `init` / `inject` / `vault-layout` / examples) in the **same change** — see [Maintaining install](INSTALL.md#maintaining-install-contributors). Keep [`UNINSTALL.md`](UNINSTALL.md) aligned with the same harness paths.
 
 ## Uninstall
 
-Paste [`UNINSTALL.md`](UNINSTALL.md) into any agent (or follow its checklist). Removes MCP + injected policy from harnesses; **keeps the vault** unless you explicitly ask to delete it.
+Same pattern — agent one-liner in [`UNINSTALL.md`](UNINSTALL.md) (or paste that file). Removes MCP + injected policy; **keeps the vault** unless you ask to delete it.
 
 ## Optional setup shortcut
 
@@ -25,8 +37,6 @@ npm install && npm run setup -- --vault "~/Obsidian/My Brain"
 Quote paths with spaces. Avoid iCloud/`Mobile Documents` if the editor sandbox returns `EPERM`.
 
 Then: open vault in Obsidian → restart editors → MCP `vault_info` → `readable: true`.
-
-**Work desk (optional):** copy `.env.example` → `.env`, set `JIRA_*` if you want plate/Jira tools; `work_today` works without Jira. Ask “what’s on my plate” / “what’s left on the list” — agents should use `work_plate` / `work_today` (see memory policy).
 
 **Orchesto:** in any product repo, ask the agent to **setup orchesto** — it should `read_note` vault `workflows/global/setup-orchesto.md`. See also [`templates/skills/orchesto/`](templates/skills/orchesto/). Orchesto always asks whether a **CPO / PRD** pass is needed before planning. Optional: ask to **brainstorm** first (conversation seat before CPO/architect).
 
@@ -121,6 +131,9 @@ Injected slim copy: [`templates/prompts/memory-policy.md`](templates/prompts/mem
 ## Repo map
 
 ```
+docs/                   # product documentation (source for site)
+site/                   # Hem Vault landing + docs (Astro)
+design-system/          # site visual system
 src/cli.ts              # brain CLI
 src/config.ts           # config.toml + BRAIN_VAULT
 src/init.ts             # vault scaffolding

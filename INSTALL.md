@@ -1,37 +1,88 @@
-# Agent install prompt — ai-mcp-brain (prompt-first)
+# Install Hem Vault (ai-mcp-brain)
 
-Paste everything under **Prompt** into any coding agent on macOS, Linux, or Windows.
+Agent-first install. There is **no** OS shell installer — this markdown *is* the install script. Paste the one-liner into any coding agent; it fetches this file with `curl` and walks every step.
 
-No install shell scripts are required. Runtime: **Bun (preferred)** or **Node.js 20+** (via local `tsx`).
+> **For LLM agents: use `curl`, NOT WebFetch / browser fetch.** Those tools summarize and drop env names, absolute paths, MCP snippets, and verify commands. Always:
+>
+> ```bash
+> curl -fsSL https://raw.githubusercontent.com/SayarB/ai-mcp-brain/main/INSTALL.md
+> ```
 
 **Maintainer rule:** any change that affects how this system is installed on a new device must update **this file** and the install path in code (`src/setup.ts`, `src/init.ts`, `src/inject.ts`, `src/runtime.ts`, `src/vault-layout.ts`, `package.json` scripts) in the **same change**. See [Maintaining install](#maintaining-install-contributors).
 
 ---
 
-## Prompt
+## For humans
 
-Install my second-brain from the `ai-mcp-brain` repo into a vault path I choose, and wire MCP + memory policy into the coding harnesses I use.
+**Recommended:** let an agent install it.
+
+### One-liner (paste into any agent)
+
+```
+Install Hem Vault (ai-mcp-brain) by following the instructions at:
+https://raw.githubusercontent.com/SayarB/ai-mcp-brain/main/INSTALL.md
+Use curl -fsSL to fetch that URL — do not use WebFetch.
+```
+
+You need a JS runtime so the MCP server can run: **Bun (preferred)** or **Node.js 20+** (via local `tsx`).
+
+### Already have the repo?
+
+Open this checkout and paste the Prompt section below, or say:
+
+```
+Follow INSTALL.md in this repo and install Hem Vault.
+```
+
+### Optional human shortcut (same repo)
+
+```bash
+bun install && bun run setup -- --vault "~/Obsidian/My Brain"
+# or
+npm install && npm run setup -- --vault "~/Obsidian/My Brain"
+```
+
+(Use quotes when the path has spaces.) Prefer the agent prompt when setup scripts are unavailable or undesirable.
+
+---
+
+## Prompt (for agents)
+
+Install Hem Vault (second brain) from `https://github.com/SayarB/ai-mcp-brain` into a vault path the user chooses, and wire MCP + memory policy into the coding harnesses they use.
 
 ### Goals
 
-1. Create an Obsidian-compatible markdown vault from `templates/vault/` (idempotent: do not overwrite existing notes).
-2. Point MCP at that vault via `BRAIN_VAULT`.
-3. Inject a short memory policy into Cursor / Claude / Codex / Zed **if those config locations exist**.
-4. Leave `instructions/global/*.md` bodies empty unless I mean binding process. Soft prefs go to `suggestions/`.
-5. Do not invent process/instruction content.
+1. Ensure a local checkout of `ai-mcp-brain` exists (clone if missing).
+2. Create an Obsidian-compatible markdown vault from `templates/vault/` (idempotent: do not overwrite existing notes).
+3. Point MCP at that vault via `BRAIN_VAULT`.
+4. Inject a short memory policy into Cursor / Claude / Codex / Zed **if those config locations exist**.
+5. Leave `instructions/global/*.md` bodies empty unless the user means binding process. Soft prefs go to `suggestions/`.
+6. Do not invent process/instruction content.
 
 ### Prerequisites
 
-- Working directory = this repo root.
 - A JS runtime to run the MCP server:
   - **Bun preferred**: `bun --version`. Install from https://bun.sh if missing
     (macOS/Linux: `curl -fsSL https://bun.sh/install | bash`; Windows: `powershell -c "irm bun.sh/install.ps1 | iex"`).
   - **Or Node.js 20+**: `node --version`. After `npm install` / `bun install`, MCP runs via `tsx` (already a repo dependency).
-- Vault path: ask me if unknown. Default suggestion: `~/Obsidian/My Brain` (or `%USERPROFILE%\Obsidian\My Brain` on Windows).
+- Vault path: ask the user if unknown. Default suggestion: `~/Obsidian/My Brain` (or `%USERPROFILE%\Obsidian\My Brain` on Windows).
 - **Avoid** vaults under iCloud/`Mobile Documents` or other sandboxed cloud folders if the editor blocks them (`EPERM`). Prefer a normal home directory path.
 - Quote paths that contain spaces.
 
 ### Steps
+
+#### 0. Ensure repo checkout
+
+If the working directory is already this repo (has `package.json` name `ai-mcp-brain` and `src/mcp/server.ts`), use it.
+
+Otherwise ask where to clone (default: a normal projects folder), then:
+
+```bash
+git clone https://github.com/SayarB/ai-mcp-brain.git
+cd ai-mcp-brain
+```
+
+All later steps run from that repo root. Remember the absolute repo path for MCP `cwd` / args.
 
 #### A. Runtime + dependencies
 
@@ -72,15 +123,9 @@ Write repo `config.toml` (gitignored) with:
 
 ```toml
 vault_path = "<absolute-or-~/vault-path>"
-
-# Optional Jira work desk (secrets live in gitignored `.env` — see `.env.example`)
-# [jira]
-# base_url = "https://your-domain.atlassian.net"
-# email_env = "JIRA_EMAIL"
-# token_env = "JIRA_API_TOKEN"
 ```
 
-See `config.example.toml`. Setup copies `.env.example` → `.env` if missing (fill optional `JIRA_*`). MCP loads `.env` at startup. Jira is **optional** — today list tools work without it.
+See `config.example.toml`. Setup copies `.env.example` → `.env` if missing. MCP loads `.env` at startup.
 
 #### D. MCP server entry (all harnesses)
 
@@ -99,8 +144,7 @@ Prefer Bun when available; otherwise Node + local `tsx`. Absolute paths:
 Common for both:
 
 - cwd: `<repo>`
-- env: `{ "BRAIN_VAULT": "<absolute-vault-path>", /* optional: JIRA_BASE_URL, JIRA_EMAIL, JIRA_API_TOKEN */ }`
-- Prefer putting Jira secrets in repo `.env` (loaded by MCP); inject may pass through `JIRA_*` when already set in the parent env at setup time.
+- env: `{ "BRAIN_VAULT": "<absolute-vault-path>" }`
 
 (Or run `npm run setup` / `bun run setup`, which picks Bun vs Node automatically via `resolveMcpLaunch` in `src/runtime.ts`.)
 
@@ -142,22 +186,22 @@ Skip any harness the user does not use.
   - `instructions/global/<kind>.md`
   - `suggestions/global/<kind>.md`
 - Confirm MCP config uses absolute paths + `BRAIN_VAULT`.
-- Tell me to restart editors and run MCP tool `vault_info` → expect `readable: true`.
+- Tell the user to restart editors and run MCP tool `vault_info` → expect `readable: true`.
 - Optional: `resolve_action` with `action=coding` should return instructions + a soft-suggestions section (bodies may be empty on a fresh install).
-- Optional work desk: with `.env` Jira filled, `jira_assigned` / `work_plate` work; without Jira, `work_today` still lists/adds/completes.
+
 ### Policy reminders to leave in place
 
 - `resolve_action` on **mode start only** (not every turn). Reuse an earlier same-action bundle already in this chat; re-resolve only on mode switch / reload / missing bundle.
 - Project guidance precedes global.
 - Soft standing prefs → `upsert_guidance` `type=suggestion` (no magic words).
-- Do not fill binding instructions unless I explicitly ask for hard rules.
+- Do not fill binding instructions unless the user explicitly asks for hard rules.
 - When asked to **setup orchesto**: `read_note` `workflows/global/setup-orchesto.md` (do not web-search; Orchesto ≠ Orca).
 - When asked to **brainstorm** / seat **brainstormer**: `read_note` `workflows/global/persona-brainstormer.md`, seat conversation persona; on proceed write `.plans/<slug>/brainstorm.md` then continue Orchesto. Not a fixed pipeline step / not CPO.
 - When asked to **audit** a repo/area: `read_note` `workflows/global/persona-auditor.md`, seat auditor, write `.audits/<scope-slug>/report.md` (ensure `.audits/` gitignored). Not Orchesto / not PR reviewer.
 
 ### Done criteria
 
-Report: vault path, which harnesses were wired, Bun vs Node MCP launch, and that MCP uses `BRAIN_VAULT`.
+Report: repo path, vault path, which harnesses were wired, Bun vs Node MCP launch, and that MCP uses `BRAIN_VAULT`.
 
 ---
 
@@ -169,15 +213,10 @@ Canonical skill text for contributors: [`templates/skills/orchesto/`](templates/
 
 ---
 
-## Optional shortcut (same repo)
+## Uninstall
 
-```bash
-bun install && bun run setup -- --vault "~/Obsidian/My Brain"
-# or
-npm install && npm run setup -- --vault "~/Obsidian/My Brain"
-```
-
-(Use quotes when the path has spaces.) Prefer the prompt steps above when setup scripts are unavailable or undesirable.
+Same pattern — agent prompt: [`UNINSTALL.md`](UNINSTALL.md)  
+Raw URL: `https://raw.githubusercontent.com/SayarB/ai-mcp-brain/main/UNINSTALL.md`
 
 ---
 
