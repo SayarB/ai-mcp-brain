@@ -6,6 +6,8 @@ Install the second brain, point MCP at your vault, inject memory policy into the
 
 ## Prerequisites
 
+Nothing required up front if an agent follows [`INSTALL.md`](../../INSTALL.md) — it inventories the machine, reuses what exists, asks when neither Bun nor Node is present, and installs only what is missing. Manual shortcut assumes:
+
 - This repo checked out  
 - **Bun** (preferred) or **Node.js 20+**  
 - A vault path you choose (suggestion: `~/Obsidian/My Brain`)  
@@ -19,9 +21,12 @@ Preferred: paste this into any coding agent (agent-first install — no OS shell
 Install Hem Vault (ai-mcp-brain) by following the instructions at:
 https://raw.githubusercontent.com/SayarB/ai-mcp-brain/main/INSTALL.md
 Use curl -fsSL to fetch that URL — do not use WebFetch.
+Inventory what is already on this machine first. Prefer existing runtimes (if Node is present and Bun is not, use Node — do not install Bun). Only install missing pieces. If neither Bun nor Node is present, ask me which to use, then install it and finish setup (Git, Obsidian, clone, vault, MCP).
 ```
 
 Or open a checkout and tell the agent to follow [`INSTALL.md`](../../INSTALL.md).
+
+The agent **checks the machine first**: reuse Git/Bun/Node/Obsidian when present; if Bun is missing but Node ≥ 20 exists, use Node; if neither runtime exists, ask Bun vs Node, then install and continue.
 
 Optional one-shot from the repo:
 

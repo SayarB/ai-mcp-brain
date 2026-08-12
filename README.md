@@ -16,9 +16,10 @@ No OS shell installer — [`INSTALL.md`](INSTALL.md) *is* the install script. Pa
 Install Hem Vault (ai-mcp-brain) by following the instructions at:
 https://raw.githubusercontent.com/SayarB/ai-mcp-brain/main/INSTALL.md
 Use curl -fsSL to fetch that URL — do not use WebFetch.
+Inventory what is already on this machine first. Prefer existing runtimes (if Node is present and Bun is not, use Node — do not install Bun). Only install missing pieces. If neither Bun nor Node is present, ask me which to use, then install it and finish setup (Git, Obsidian, clone, vault, MCP).
 ```
 
-The agent clones (if needed), copies `templates/vault/`, and wires MCP/rules. Runtime: **Bun (preferred)** or **Node.js 20+** (local `tsx`).
+The agent inventories the machine first, reuses Git/Bun/Node/Obsidian when present, asks when neither Bun nor Node exists, then finishes vault + MCP wiring.
 
 **If you change how install works**, update `INSTALL.md` and the install scripts (`setup` / `init` / `inject` / `vault-layout` / examples) in the **same change** — see [Maintaining install](INSTALL.md#maintaining-install-contributors). Keep [`UNINSTALL.md`](UNINSTALL.md) aligned with the same harness paths.
 
