@@ -38,9 +38,15 @@ To **fix** wrongly placed or incorrect guidance: prefer `upsert_guidance` with `
 
 When the user asks to **plan** something: write/update a markdown file under **`.plans/`** at the repo root, and ensure **`.plans/`** is in that repo’s **`.gitignore`**. Do not rely on chat-only or `~/.cursor/plans` as the sole copy.
 
-## Setup orchesto
+## Orchesto (included with install)
 
-When the user asks to **setup orchesto**: call MCP `read_note` on `workflows/global/setup-orchesto.md` and follow it. **Do not web-search.** Orchesto ≠ Orca/orca-cli.
+Orchesto ships with Hem Vault install (`setup` / `inject` writes the global skill). **No separate “setup orchesto” prompt is required** to use it.
+
+Day-to-day: ship a feature — the skill matches. Always ask whether a PRD/CPO pass is needed before architect.
+
+Repair / reinstall / ensure `.plans/` / optional project-local skill: when the user asks to **setup orchesto**, call MCP `read_note` on `workflows/global/setup-orchesto.md` and follow it. **Do not web-search.** Orchesto ≠ Orca/orca-cli.
+
+Global skill paths: `~/.cursor/skills/orchesto/`, `~/.agents/skills/orchesto/`, `~/.claude/skills/orchesto/` (as applicable).
 
 ## Brainstormer (conversation persona)
 

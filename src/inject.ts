@@ -278,6 +278,65 @@ async function mergeZedSettings(
   };
 }
 
+/** Global Orchesto skill paths (user-level harness adapters). */
+export function orchestoGlobalSkillPaths(target: InjectTarget = "all"): string[] {
+  const paths: string[] = [];
+  const doCursor = target === "all" || target === "cursor";
+  const doClaude = target === "all" || target === "claude";
+  // Zed / Codex / OpenCode-style agents path
+  const doAgents =
+    target === "all" || target === "zed" || target === "codex";
+
+  if (doCursor) paths.push(expandHome("~/.cursor/skills/orchesto/SKILL.md"));
+  if (doAgents) paths.push(expandHome("~/.agents/skills/orchesto/SKILL.md"));
+  if (doClaude) paths.push(expandHome("~/.claude/skills/orchesto/SKILL.md"));
+  return paths;
+}
+
+async function loadOrchestoSkillBody(): Promise<string> {
+  const skillPath = join(configDir(), "templates", "skills", "orchesto", "SKILL.md");
+  const body = await readText(skillPath);
+  return body.endsWith("\n") ? body : `${body}\n`;
+}
+
+async function installOrchestoSkillFile(
+  destPath: string,
+  skillBody: string,
+): Promise<InjectAction> {
+  await mkdir(dirname(destPath), { recursive: true });
+  const existed = await pathExists(destPath);
+  if (existed) {
+    const existing = await readText(destPath);
+    if (existing === skillBody) {
+      return {
+        target: "orchesto-skill",
+        path: destPath,
+        action: "skipped",
+        detail: "unchanged",
+      };
+    }
+  }
+  await writeText(destPath, skillBody);
+  return {
+    target: "orchesto-skill",
+    path: destPath,
+    action: existed ? "updated" : "wrote",
+    detail: "global Orchesto skill",
+  };
+}
+
+/** Install Orchesto SKILL.md into global harness skill dirs (idempotent). */
+export async function installOrchestoSkills(
+  target: InjectTarget = "all",
+): Promise<InjectAction[]> {
+  const skillBody = await loadOrchestoSkillBody();
+  const actions: InjectAction[] = [];
+  for (const dest of orchestoGlobalSkillPaths(target)) {
+    actions.push(await installOrchestoSkillFile(dest, skillBody));
+  }
+  return actions;
+}
+
 export async function injectHarnesses(
   target: InjectTarget = "all",
 ): Promise<{ vaultPath: string; actions: InjectAction[] }> {
@@ -323,6 +382,9 @@ export async function injectHarnesses(
   if (doZed) {
     actions.push(...(await injectZed(config, policy, vaultPath)));
   }
+
+  // Orchesto ships with the brain — global harness skill adapters
+  actions.push(...(await installOrchestoSkills(target)));
 
   return { vaultPath, actions };
 }

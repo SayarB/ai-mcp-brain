@@ -27,8 +27,13 @@
       radial-gradient(ellipse 120% 80% at 10% -10%, rgba(47, 111, 104, 0.08), transparent 55%),
       radial-gradient(ellipse 90% 60% at 100% 0%, rgba(26, 31, 28, 0.05), transparent 50%),
       linear-gradient(180deg, var(--color-paper) 0%, var(--color-paper-deep) 100%);
-    background-attachment: fixed;
     min-height: 100vh;
+  }
+
+  @media (min-width: 768px) {
+    body {
+      background-attachment: fixed;
+    }
   }
 
   ::selection {
@@ -58,19 +63,19 @@
   }
 
   .prose-docs {
-    @apply max-w-none text-[1.05rem] leading-relaxed text-ink;
+    @apply max-w-none text-base leading-relaxed text-ink sm:text-[1.05rem];
   }
 
   .prose-docs h1 {
-    @apply font-display mt-0 mb-6 text-4xl font-semibold tracking-tight text-ink;
+    @apply font-display mt-0 mb-5 text-[1.85rem] font-semibold tracking-tight text-ink sm:mb-6 sm:text-4xl;
   }
 
   .prose-docs h2 {
-    @apply font-display mt-12 mb-4 text-2xl font-semibold text-ink;
+    @apply font-display mt-10 mb-3 text-xl font-semibold text-ink sm:mt-12 sm:mb-4 sm:text-2xl;
   }
 
   .prose-docs h3 {
-    @apply font-display mt-8 mb-3 text-xl font-semibold text-ink;
+    @apply font-display mt-8 mb-3 text-lg font-semibold text-ink sm:text-xl;
   }
 
   .prose-docs p,
@@ -104,7 +109,11 @@
   }
 
   .prose-docs table {
-    @apply mb-6 w-full border-collapse text-left text-[0.95rem];
+    @apply mb-0 w-full min-w-[36rem] border-collapse text-left text-[0.9rem] sm:min-w-0 sm:text-[0.95rem];
+  }
+
+  .prose-docs .table-scroll {
+    @apply mb-6 max-w-full overflow-x-auto overscroll-x-contain [-webkit-overflow-scrolling:touch];
   }
 
   .prose-docs th,

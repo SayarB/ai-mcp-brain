@@ -90,10 +90,11 @@ export async function runSetup(opts?: {
 Next:
   1. Open the vault folder in Obsidian (optional but recommended)
   2. Optional work desk: copy .env.example → .env, set JIRA_* , restart MCP
-  3. Restart Cursor / Claude / Codex / Zed so MCP reloads
+  3. Restart Cursor / Claude / Codex / Zed so MCP + Orchesto skill reload
   4. Call MCP tool vault_info — expect readable: true
   5. Soft prefs auto-log to suggestions/; binding rules go in instructions/ only when you mean hard process
-  6. In this repo: git config core.hooksPath .githooks  (post-push restarts local MCP)
+  6. Orchesto is installed globally (no separate "setup orchesto" needed) — ship features; ensure .plans/ is gitignored in product repos
+  7. In this repo: git config core.hooksPath .githooks  (post-push restarts local MCP)
 `);
 }
 

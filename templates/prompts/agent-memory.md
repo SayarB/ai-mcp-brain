@@ -96,9 +96,9 @@ Seeded actions: `coding`, `pr-review`, `commit`, `git`. New actions = vault regi
 
 Project `actions/registry.md` merges with global: project instruction/workflow refs listed first, then global extras.
 
-### Orchesto (project skill)
+### Orchesto (included with Hem Vault)
 
-Orchesto personas (`persona-cpo` optional / `persona-architect` / `persona-implementor` / `persona-reviewer`) live under `workflows/global/` (optional project overlays). They are **not** actions. Setup playbook: `workflows/global/setup-orchesto.md`. The pipeline is a **project** skill installed via that playbook (Zed `.agents/skills/orchesto/`, Cursor `.cursor/skills/orchesto/`). Orchesto **always asks** whether a PRD / CPO pass is needed before architect; seat CPO only on user yes. Do not add an `orchesto` action. Optional pre-step: user may seat **brainstormer** before CPO/architect (not auto-run).
+Orchesto personas (`persona-cpo` optional / `persona-architect` / `persona-implementor` / `persona-reviewer`) live under `workflows/global/` (optional project overlays). They are **not** actions. The pipeline skill is installed **with Hem Vault** (`setup` / `inject`) into global harness dirs: `~/.cursor/skills/orchesto/`, `~/.agents/skills/orchesto/`, `~/.claude/skills/orchesto/`. Repair / extras playbook: `workflows/global/setup-orchesto.md`. Orchesto **always asks** whether a PRD / CPO pass is needed before architect; seat CPO only on user yes. Do not add an `orchesto` action. Optional pre-step: user may seat **brainstormer** before CPO/architect (not auto-run).
 
 ### Brainstormer (standalone conversation persona)
 

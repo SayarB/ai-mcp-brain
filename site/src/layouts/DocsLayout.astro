@@ -18,7 +18,7 @@ const { title, description, pages, currentHref } = Astro.props;
   <Nav />
   <div class="mx-auto flex min-h-[calc(100vh-4.5rem)] max-w-6xl flex-col md:flex-row">
     <DocsSidebar pages={pages} currentHref={currentHref} />
-    <main class="min-w-0 flex-1 px-5 py-10 md:px-10 md:py-12 lg:px-14">
+    <main class="min-w-0 flex-1 overflow-x-hidden px-5 py-8 sm:py-10 md:px-10 md:py-12 lg:px-14">
       <article class="prose-docs max-w-3xl">
         <slot />
       </article>

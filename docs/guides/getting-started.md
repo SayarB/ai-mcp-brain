@@ -50,7 +50,7 @@ Quote paths with spaces. Setup creates/merges the vault from `templates/vault/`,
 | Want | Do |
 |------|-----|
 | Soft prefs / process | [Extending guidance](extending-guidance.md) |
-| Feature delivery skill | [Orchesto](orchesto.md) — say **setup orchesto** in a product repo |
+| Feature delivery skill | [Orchesto](orchesto.md) — included with install; ship features directly |
 | Capture / load memory | [Daily memory](daily-memory.md) |
 
 ## Uninstall

@@ -6,9 +6,9 @@ tags: [orchesto, skill-template]
 updated: 2026-07-31
 ---
 
-# Orchesto skill template (for project install)
+# Orchesto skill template
 
-When **setup orchesto** runs, copy the fenced `SKILL.md` body below into the harness adapter path (including the YAML frontmatter): Zed → `<git-repo>/.agents/skills/orchesto/SKILL.md`; Cursor → `<git-repo>/.cursor/skills/orchesto/SKILL.md`. Keep this note in sync with ai-mcp-brain `templates/skills/orchesto/SKILL.md`.
+Hem Vault **INSTALL** / `setup` / `inject` copies the fenced `SKILL.md` body below into **global** harness paths (including YAML frontmatter): Cursor → `~/.cursor/skills/orchesto/SKILL.md`; Zed/Codex → `~/.agents/skills/orchesto/SKILL.md`; Claude → `~/.claude/skills/orchesto/SKILL.md`. Optional project-local copies via **setup orchesto** repair playbook. Keep this note in sync with ai-mcp-brain `templates/skills/orchesto/SKILL.md`.
 
 ```markdown
 ---
@@ -28,7 +28,7 @@ Procedure only. Persona bodies and action process live in the second-brain vault
 ## Prerequisites
 
 - ai-mcp-brain MCP available (`BRAIN_VAULT`)
-- Vault personas readable (after **setup orchesto**): `workflows/global/persona-cpo.md`, `persona-architect.md`, `persona-implementor.md`, `persona-reviewer.md`, `persona-brainstormer.md` (project overlays under `projects/<slug>/workflows/` win when present)
+- Vault personas readable (shipped with Hem Vault install): `workflows/global/persona-cpo.md`, `persona-architect.md`, `persona-implementor.md`, `persona-reviewer.md`, `persona-brainstormer.md` (project overlays under `projects/<slug>/workflows/` win when present)
 
 ## Artifacts
 

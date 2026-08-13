@@ -9,10 +9,72 @@ interface Props {
 
 const { pages, currentHref } = Astro.props;
 const groups = navGroups(pages);
+
+const currentTitle =
+  pages.find((p) => p.href === currentHref)?.title ?? "Docs";
 ---
 
 <aside class="docs-sidebar shrink-0 border-line md:w-60 md:border-r lg:w-64">
-  <nav class="sticky top-0 max-h-[100dvh] overflow-y-auto px-5 py-8 md:px-6" aria-label="Documentation">
+  <!-- Mobile: collapsed by default so article content is reachable -->
+  <details class="docs-nav-mobile group border-b border-line md:hidden">
+    <summary
+      class="flex min-h-12 cursor-pointer list-none items-center justify-between gap-3 px-5 py-3 text-sm font-semibold text-ink marker:content-none [&::-webkit-details-marker]:hidden"
+    >
+      <span class="min-w-0 truncate">
+        <span class="text-muted font-medium">Docs</span>
+        <span class="mx-1.5 text-line" aria-hidden="true">/</span>
+        <span>{currentTitle}</span>
+      </span>
+      <span
+        class="shrink-0 text-accent transition-transform duration-200 group-open:rotate-180"
+        aria-hidden="true"
+      >
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+          <path
+            d="M4 6l4 4 4-4"
+            stroke="currentColor"
+            stroke-width="1.75"
+            stroke-linecap="round"
+            stroke-linejoin="round"></path>
+        </svg>
+      </span>
+    </summary>
+    <nav class="max-h-[min(70dvh,28rem)] overflow-y-auto px-5 pb-6 pt-2" aria-label="Documentation">
+      {
+        groups.map((group) =>
+          group.items.length ? (
+            <div class="mb-6">
+              <p class="section-label mb-2">{group.label}</p>
+              <ul class="space-y-0.5">
+                {group.items.map((item) => (
+                  <li>
+                    <a
+                      href={item.href}
+                      class:list={[
+                        "block rounded-sm px-2 py-2.5 text-sm no-underline transition-colors",
+                        item.href === currentHref
+                          ? "bg-paper-deep font-semibold text-accent"
+                          : "text-ink/80 hover:bg-paper-deep/70 hover:text-accent",
+                      ]}
+                      aria-current={item.href === currentHref ? "page" : undefined}
+                    >
+                      {item.title}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null,
+        )
+      }
+    </nav>
+  </details>
+
+  <!-- Desktop: always-visible sticky sidebar -->
+  <nav
+    class="sticky top-0 hidden max-h-[100dvh] overflow-y-auto px-5 py-8 md:block md:px-6"
+    aria-label="Documentation"
+  >
     {
       groups.map((group) =>
         group.items.length ? (

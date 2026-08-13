@@ -3,19 +3,22 @@ type: workflow
 id: setup-orchesto
 scope: global
 tags: [orchesto, setup]
-updated: 2026-07-31
+updated: 2026-08-12
 ---
 
 # Setup orchesto
 
 **Orchesto ≠ Orca / orca-cli.** Do not web-search. Follow this note only.
 
-When the user asks to **setup orchesto** in a git repo, do the following in that repo.
+Hem Vault **INSTALL** / `bun run setup` already installs Orchesto **out of the box** (global skill + vault personas). Day-to-day: ship features — no separate setup prompt required.
+
+Use this playbook when the user asks to **setup orchesto** to **repair**, **reinstall**, ensure `.plans/` in the current repo, or optionally add a **project-local** skill copy.
 
 ## 1. Vault + MCP
 
 - Call `vault_info` — expect `readable: true`.
-- Personas and this playbook live in the vault. The pipeline skill is **project-only** (never global user skill dirs).
+- Personas and this playbook live in the vault.
+- Default skill home = **global** user dirs (installed with the brain). Project-local copies are optional overlays for per-repo DAG edits.
 
 ## 2. Ensure personas (idempotent)
 
@@ -29,19 +32,28 @@ These vault notes must exist (create from brain templates only if **missing** �
 
 If missing: copy from the ai-mcp-brain checkout that runs this MCP (`templates/vault/workflows/global/persona-*.md`). Discover that checkout via the MCP server working directory if needed. Prefer `read_note` on the paths above once present.
 
-## 3. Install project skill (harness adapter)
+## 3. Install / repair skill (harness adapter)
 
 1. Read the skill body from vault note `workflows/global/orchesto-skill-template.md` (or from ai-mcp-brain `templates/skills/orchesto/SKILL.md` if that note is missing).
-2. Detect the coding harness (user said which editor, or project markers). Install the **same** `SKILL.md` body to the matching **project-local** path(s):
+2. **Default (matches INSTALL):** write the same `SKILL.md` body to matching **global** paths:
+
+| Harness | Global skill path |
+|---------|-------------------|
+| **Cursor** | `~/.cursor/skills/orchesto/SKILL.md` |
+| **Zed** / **Codex** / **OpenCode** | `~/.agents/skills/orchesto/SKILL.md` |
+| **Claude Code** | `~/.claude/skills/orchesto/SKILL.md` |
+
+3. Prefer `bun run brain -- inject` / `npm run brain -- inject` from the ai-mcp-brain checkout when available (installs Orchesto with harness inject).
+4. **Optional project-local** (only if the user asks for a per-repo skill / Conductor workspace copy):
 
 | Harness | Project skill path |
 |---------|-------------------|
-| **Zed** | `<repo>/.agents/skills/orchesto/SKILL.md` |
+| **Zed** / **Codex** / **OpenCode** | `<repo>/.agents/skills/orchesto/SKILL.md` |
 | **Cursor** | `<repo>/.cursor/skills/orchesto/SKILL.md` |
+| **Claude Code** | `<repo>/.claude/skills/orchesto/SKILL.md` |
 
-3. If the user named a harness (e.g. “this is zed”), install that path only. If unclear or they use both, install both.
-4. If a target file already exists and differs, **ask** before overwrite.
-5. Do **not** install under `~/.agents/skills/` or `~/.cursor/skills/`.
+5. If a target file already exists and differs, **ask** before overwrite (except when re-running brain inject / fresh INSTALL).
+6. **Conductor:** no proprietary skill path — install the global paths (and project-local copies if they asked for Conductor workspaces).
 
 ## 4. Plans folder
 
@@ -52,14 +64,15 @@ If missing: copy from the ai-mcp-brain checkout that runs this MCP (`templates/v
 
 Tell the user:
 
-- Skill path(s) installed (Zed and/or Cursor as above — edit DAG per project there)
+- Skill path(s) installed (global by default; project-local only if requested)
 - Personas: `workflows/global/persona-*.md` (per-repo overlays: `projects/<slug>/workflows/persona-*.md`)
 - Runtime: Orchesto **always asks** whether a PRD/CPO pass is needed before architect; CPO is optional
 - Optional: user may seat **brainstormer** (`persona-brainstormer`) for conversation before CPO/architect — not auto-run
+- Reminder: Orchesto already ships with Hem Vault install — this playbook is repair / extras
 
-## Day-to-day (after setup)
+## Day-to-day (after install)
 
-The project skill runs optional CPO (PRD) → architect → plan + validations → implementor → reviewer (fix loop ≤ 3). User does not need to say “run orchesto.”
+The skill runs optional CPO (PRD) → architect → plan + validations → implementor → reviewer (fix loop ≤ 3). User does not need to say “run orchesto” or “setup orchesto.”
 
 Optional pre-step: user asks to **brainstorm** / seat **brainstormer** — conversation until they proceed, then the normal pipeline (PRD ask → …).
 

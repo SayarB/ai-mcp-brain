@@ -15,7 +15,7 @@ Procedure only. Persona bodies and action process live in the second-brain vault
 ## Prerequisites
 
 - ai-mcp-brain MCP available (`BRAIN_VAULT`)
-- Vault personas readable (after **setup orchesto**): `workflows/global/persona-cpo.md`, `persona-architect.md`, `persona-implementor.md`, `persona-reviewer.md`, `persona-brainstormer.md` (project overlays under `projects/<slug>/workflows/` win when present)
+- Vault personas readable (shipped with Hem Vault install): `workflows/global/persona-cpo.md`, `persona-architect.md`, `persona-implementor.md`, `persona-reviewer.md`, `persona-brainstormer.md` (project overlays under `projects/<slug>/workflows/` win when present)
 
 ## Artifacts
 

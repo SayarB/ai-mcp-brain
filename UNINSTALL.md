@@ -38,9 +38,10 @@ Uninstall my second-brain harness wiring for `ai-mcp-brain` on this machine. Lea
 
 1. Remove `ai-mcp-brain` from Cursor / Claude / Codex / Zed MCP (or context server) configs.
 2. Remove injected second-brain policy blocks and Cursor rule files this install wrote.
-3. Stop any running `ai-mcp-brain` MCP processes.
-4. Optionally clean repo-local install artifacts (`config.toml`, project `.cursor/mcp.json`).
-5. **Never** delete the vault or Obsidian notes unless I clearly ask.
+3. Optionally remove the global **Orchesto** skill dirs this install wrote (ask first).
+4. Stop any running `ai-mcp-brain` MCP processes.
+5. Optionally clean repo-local install artifacts (`config.toml`, project `.cursor/mcp.json`).
+6. **Never** delete the vault or Obsidian notes unless I clearly ask.
 
 ### Prerequisites
 
@@ -84,7 +85,17 @@ Edit `~/.claude/CLAUDE.md`: remove the marked block between `<!-- second-brain:s
 
 Skip any harness the user does not use or whose paths do not exist.
 
-#### F. Repo-local artifacts (optional — ask first)
+#### F. Orchesto global skill (optional — ask first)
+
+Hem Vault install also wrote the Orchesto skill globally. Only remove if I want Orchesto gone with the brain:
+
+- Delete `~/.cursor/skills/orchesto/` (or just `SKILL.md`) if present
+- Delete `~/.agents/skills/orchesto/` if present
+- Delete `~/.claude/skills/orchesto/` if present
+
+Do **not** delete project-local `.agents/skills/orchesto` / `.cursor/skills/orchesto` in unrelated product repos unless I ask.
+
+#### G. Repo-local artifacts (optional — ask first)
 
 Only if I want a clean clone state:
 
@@ -92,16 +103,17 @@ Only if I want a clean clone state:
 - Leave `node_modules/` unless I ask to remove dependencies.
 - Do **not** remove `.githooks/` or `scripts/restart-mcp.sh` from the repo itself — those are part of the project source, not machine install state.
 
-#### G. Vault (optional — ask first, default keep)
+#### H. Vault (optional — ask first, default keep)
 
 - **Default:** keep the vault folder (notes, suggestions, projects, etc.).
 - **Only if I say so:** delete or archive the vault directory. Confirm the absolute path before deleting.
 
-#### H. Verify
+#### I. Verify
 
 - No `ai-mcp-brain` entry in Cursor/Codex/Zed MCP configs.
 - No `second-brain.mdc` under `~/.cursor/rules/`.
 - Marked second-brain blocks gone from Claude/Codex/Zed agent files.
+- If I asked to remove Orchesto: global `*/skills/orchesto/` dirs gone.
 - `pgrep -f 'ai-mcp-brain/src/mcp/server.ts'` (or equivalent) returns nothing.
 - Tell me to restart/reload editors so they drop stale MCP clients.
 
@@ -124,6 +136,7 @@ Report: which harnesses were cleaned, whether the vault was kept or deleted, and
 | Codex MCP | `~/.codex/config.toml` → strip `# --- ai-mcp-brain MCP server ---` … end marker |
 | Zed MCP | `context_servers.ai-mcp-brain` in Zed `settings.json` |
 | Zed agents | Zed `AGENTS.md` → strip marked block |
+| Orchesto skill (optional) | `~/.cursor/skills/orchesto/`, `~/.agents/skills/orchesto/`, `~/.claude/skills/orchesto/` |
 | Vault | keep by default |
 
 Re-install later: [`INSTALL.md`](INSTALL.md).

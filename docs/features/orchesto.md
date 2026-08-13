@@ -2,14 +2,14 @@
 
 ## Overview
 
-**Orchesto** is a project-local multi-phase delivery skill: optional brainstorm → always-ask PRD gate → optional CPO → architect → implementor → reviewer → fix loop (≤3) → summary.
+**Orchesto** is a multi-phase delivery skill (installed with Hem Vault): optional brainstorm → always-ask PRD gate → optional CPO → architect → implementor → reviewer → fix loop (≤3) → summary.
 
 It is for shipping a feature end-to-end with plan, validations, and review — not tiny one-off edits or a lone PR review. It is **not** Orca / orca-cli.
 
 | Owned by | What |
 |----------|------|
-| **Vault (MCP)** | Persona bodies, setup playbook, skill template note, coding/PR process via `resolve_action` |
-| **Project skill** | Pipeline procedure only — who seats when, gates, artifact paths, fix-loop cap |
+| **Vault (MCP)** | Persona bodies, setup/repair playbook, skill template note, coding/PR process via `resolve_action` |
+| **Global skill** | Pipeline procedure only — who seats when, gates, artifact paths, fix-loop cap (installed by `setup` / `inject`) |
 
 ## Personas
 
@@ -70,8 +70,8 @@ See [Orchesto guide](../guides/orchesto.md) for setup, ship, brainstorm, and aud
 
 **Quick phrases**
 
-- **setup orchesto** — install project skill + ensure personas  
-- Ship a feature end-to-end — skill matches; answer the PRD ask  
+- Ship a feature end-to-end — skill matches (installed with Hem Vault); answer the PRD ask  
+- **setup orchesto** — optional repair / ensure `.plans/` / project-local skill copy  
 - **brainstorm** / seat **brainstormer** — conversation seat (never auto)  
 - **audit** — standalone auditor  
 
@@ -80,7 +80,7 @@ See [Orchesto guide](../guides/orchesto.md) for setup, ship, brainstorm, and aud
 - Never web-search for Orchesto setup — vault playbook only  
 - Brainstormer and CPO are never auto-seated without an explicit user yes  
 - PRD ask is mandatory before architect (hinting OK; skipping not)  
-- Skill is **project-local** only — never install to `~/.agents` / `~/.cursor` as the primary path  
+- Default skill home is **global** (`~/.cursor/skills`, `~/.agents/skills`, `~/.claude/skills`) — project-local copies are optional  
 - Reviewer ≠ auditor  
 - After 3 failed review rounds: stop; summarize blockers  
 

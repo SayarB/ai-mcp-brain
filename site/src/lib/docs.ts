@@ -140,12 +140,24 @@ function addHeadingIds(html: string): string {
   });
 }
 
+/** Wrap tables so wide markdown tables scroll on small screens. */
+function wrapTables(html: string): string {
+  return html.replace(/<table[\s\S]*?<\/table>/g, (table) =>
+    `<div class="table-scroll">${table}</div>`,
+  );
+}
+
+async function renderMarkdownHtml(md: string): Promise<string> {
+  const html = await Promise.resolve(marked.parse(md));
+  return wrapTables(addHeadingIds(String(html)));
+}
+
 async function loadRepoMarkdown(filename: string, slug: string, titleFallback: string): Promise<DocPage> {
   const sourcePath = join(repoRoot, filename);
   const raw = await readFile(sourcePath, "utf8");
   const rewritten = rewriteMarkdownLinks(raw, slug);
   const title = titleFromMarkdown(raw, titleFallback);
-  const html = addHeadingIds(await marked.parse(rewritten));
+  const html = await renderMarkdownHtml(rewritten);
   return {
     slug,
     title,
@@ -167,7 +179,7 @@ export async function getAllDocs(): Promise<DocPage[]> {
     const raw = await readFile(abs, "utf8");
     const rewritten = rewriteMarkdownLinks(raw, slug);
     const title = titleFromMarkdown(raw, slug);
-    const html = addHeadingIds(await marked.parse(rewritten));
+    const html = await renderMarkdownHtml(rewritten);
     pages.push({
       slug,
       title,

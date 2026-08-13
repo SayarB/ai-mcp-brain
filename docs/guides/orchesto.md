@@ -1,22 +1,18 @@
 # Guide: Orchesto
 
-## Setup (once per product repo)
+## Setup (ships with Hem Vault)
 
-Prerequisites: ai-mcp-brain MCP up (`vault_info` → `readable: true`).
+Prerequisites: ai-mcp-brain installed via [`INSTALL.md`](../../INSTALL.md) — Orchesto global skill + vault personas are included. MCP up (`vault_info` → `readable: true`).
 
-1. In the product git repo, say **setup orchesto**  
-2. Agent follows vault `workflows/global/setup-orchesto.md`:  
-   - Ensures persona notes exist (create if missing — never overwrite)  
-   - Installs the project skill from the vault skill template  
-   - Ensures `.plans/` exists and is gitignored  
+No separate **setup orchesto** prompt is required for day-to-day use.
 
-| Harness | Skill path |
-|---------|------------|
-| Zed / Codex-style | `<repo>/.agents/skills/orchesto/SKILL.md` |
-| Cursor | `<repo>/.cursor/skills/orchesto/SKILL.md` |
-| Claude Code | `<repo>/.claude/skills/orchesto/SKILL.md` |
+| Harness | Global skill path |
+|---------|-------------------|
+| Cursor | `~/.cursor/skills/orchesto/SKILL.md` |
+| Zed / Codex-style | `~/.agents/skills/orchesto/SKILL.md` |
+| Claude Code | `~/.claude/skills/orchesto/SKILL.md` |
 
-Project-local only. Agent asks before overwriting a differing existing skill.
+Optional repair / ensure `.plans/` / project-local skill copy: say **setup orchesto** → agent follows vault `workflows/global/setup-orchesto.md`.
 
 ## Ship a feature
 
