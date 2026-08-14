@@ -11,6 +11,7 @@ import {
 export type InjectConfig = {
   cursor_rules_dir: string;
   cursor_mcp_file: string;
+  cursor_hooks_file: string;
   claude_file: string;
   codex_file: string;
   codex_config: string;
@@ -23,6 +24,8 @@ export type JiraConfig = {
   email_env?: string;
   token_env?: string;
   default_jql?: string;
+  default_project?: string;
+  default_issue_type?: string;
 };
 
 export type BrainConfig = {
@@ -42,6 +45,7 @@ export function platformInjectDefaults(): InjectConfig {
   return {
     cursor_rules_dir: "~/.cursor/rules",
     cursor_mcp_file: "~/.cursor/mcp.json",
+    cursor_hooks_file: "~/.cursor/hooks.json",
     claude_file: "~/.claude/CLAUDE.md",
     codex_file: "~/.codex/AGENTS.md",
     codex_config: "~/.codex/config.toml",
@@ -110,6 +114,8 @@ export async function loadConfig(): Promise<BrainConfig> {
         email_env: parsed.jira.email_env,
         token_env: parsed.jira.token_env,
         default_jql: parsed.jira.default_jql,
+        default_project: parsed.jira.default_project,
+        default_issue_type: parsed.jira.default_issue_type,
       }
     : undefined;
 
@@ -118,6 +124,8 @@ export async function loadConfig(): Promise<BrainConfig> {
     inject: {
       cursor_rules_dir: parsed.inject?.cursor_rules_dir ?? inj.cursor_rules_dir,
       cursor_mcp_file: parsed.inject?.cursor_mcp_file ?? inj.cursor_mcp_file,
+      cursor_hooks_file:
+        parsed.inject?.cursor_hooks_file ?? inj.cursor_hooks_file,
       claude_file: parsed.inject?.claude_file ?? inj.claude_file,
       codex_file: parsed.inject?.codex_file ?? inj.codex_file,
       codex_config: parsed.inject?.codex_config ?? inj.codex_config,

@@ -26,6 +26,8 @@ import {
 } from "../vault.ts";
 import {
   toolJiraAssigned,
+  toolJiraRelease,
+  toolWorkLog,
   toolWorkPlate,
   toolWorkToday,
 } from "../work/tools.ts";
@@ -589,6 +591,113 @@ export function createBrainServer(): McpServer {
         if (err instanceof JiraNotConfiguredError) {
           return errorResult(err);
         }
+        return errorResult(err);
+      }
+    },
+  );
+
+  server.registerTool(
+    "work_log",
+    {
+      title: "Day work log",
+      description:
+        "Daily time ledger at work/log/YYYY-MM-DD.md. op=event appends a timestamped event (key only if the user supplied one — never infer). op=review derives 15m activity buckets, harvests today's git commits, and fetches the user's existing Jira worklogs for the day to flag overlaps. op=push posts native Jira worklogs for an explicit entries array only; default is delta (requested minus already-logged); force=true is the only override. Nothing is posted without the user reviewing first.",
+      inputSchema: {
+        op: z.enum(["event", "review", "push"]).describe("Operation"),
+        kind: z
+          .enum([
+            "session-start",
+            "session-end",
+            "note",
+            "commit",
+            "done",
+            "focus",
+          ])
+          .optional()
+          .describe("Event kind (event op, default note)"),
+        session: z.string().optional().describe("Session/conversation id"),
+        key: z
+          .string()
+          .optional()
+          .describe("User-supplied issue key only — never inferred"),
+        text: z.string().optional().describe("Event text / note"),
+        date: z.string().optional().describe("YYYY-MM-DD (default today)"),
+        cwd: z
+          .string()
+          .optional()
+          .describe("Repo path for git harvest (review)"),
+        entries: z
+          .array(
+            z.object({
+              key: z.string(),
+              minutes: z.number(),
+              comment: z.string().optional(),
+              force: z
+                .boolean()
+                .optional()
+                .describe("Post even if Jira already has time today"),
+            }),
+          )
+          .optional()
+          .describe("Explicit push list — required for op=push"),
+        create: z
+          .array(
+            z.object({
+              summary: z.string(),
+              project: z.string().optional(),
+              issueType: z.string().optional(),
+            }),
+          )
+          .optional()
+          .describe("Issues to create before push (user-confirmed)"),
+      },
+    },
+    async (args) => {
+      try {
+        const result = await toolWorkLog(args);
+        return textResult(JSON.stringify(result, null, 2));
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  );
+
+  server.registerTool(
+    "jira_release",
+    {
+      title: "Jira sprint release",
+      description:
+        "User-initiated sprint releases. op=sprints lists sprints for a project. op=preview lists a sprint's issues with status — no selection, no filtering. op=create requires an explicit version name and explicit issue keys (never derived, never chosen by the agent), creates the version unreleased, then stamps fixVersion per issue. op=release marks a version released. Needs Manage Versions / Administer Projects. Never auto-fires.",
+      inputSchema: {
+        op: z
+          .enum(["sprints", "preview", "create", "release"])
+          .describe("Operation"),
+        project: z
+          .string()
+          .optional()
+          .describe("Project key (or [jira] default_project)"),
+        sprintId: z.number().int().optional().describe("Sprint id (preview)"),
+        name: z
+          .string()
+          .optional()
+          .describe("Version name — required for create, user-supplied"),
+        keys: z
+          .array(z.string())
+          .optional()
+          .describe("Issue keys to stamp — required for create, user-chosen"),
+        versionId: z.string().optional().describe("Version id (release)"),
+        releaseDate: z
+          .string()
+          .optional()
+          .describe("YYYY-MM-DD (release, default today)"),
+        description: z.string().optional().describe("Version description"),
+      },
+    },
+    async (args) => {
+      try {
+        const result = await toolJiraRelease(args);
+        return textResult(JSON.stringify(result, null, 2));
+      } catch (err) {
         return errorResult(err);
       }
     },

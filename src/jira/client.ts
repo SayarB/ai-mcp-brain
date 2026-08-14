@@ -6,6 +6,8 @@ export type JiraRuntimeConfig = {
   email: string;
   token: string;
   defaultJql: string;
+  defaultProject?: string;
+  defaultIssueType?: string;
 };
 
 export class JiraNotConfiguredError extends Error {
@@ -29,7 +31,14 @@ export function resolveJiraConfig(config: BrainConfig): JiraRuntimeConfig | null
   const defaultJql = j?.default_jql?.trim() || DEFAULT_JIRA_JQL;
 
   if (!baseUrl || !email || !token) return null;
-  return { baseUrl, email, token, defaultJql };
+  return {
+    baseUrl,
+    email,
+    token,
+    defaultJql,
+    defaultProject: j?.default_project?.trim() || undefined,
+    defaultIssueType: j?.default_issue_type?.trim() || "Task",
+  };
 }
 
 export function isJiraConfigured(config: BrainConfig): boolean {

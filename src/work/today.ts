@@ -168,8 +168,10 @@ export async function appendDayLog(
   } else {
     body = `# Work log ${date}\n\n`;
   }
-  const stamp = new Date().toISOString();
-  body += `- ${stamp} — ${line.trim()}\n`;
+  const now = new Date();
+  const hh = String(now.getHours()).padStart(2, "0");
+  const mm = String(now.getMinutes()).padStart(2, "0");
+  body += `- ${hh}:${mm} done — ${line.trim()}\n`;
   await writeText(path, body);
   return path;
 }
