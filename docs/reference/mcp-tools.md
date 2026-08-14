@@ -158,6 +158,47 @@ Soft standing prefs → `suggestion`. Binding → `instruction` only for hard ru
 
 ---
 
+## Work desk
+
+### `jira_assigned`
+
+Fetch or return cached assigned issues. Default `scope=sprint`. Does not modify `work/today.md`.
+
+### `work_today`
+
+Vault-only today list. `op=list|add|complete`. Never calls Jira.
+
+### `work_plate`
+
+Diff Jira snapshot vs today. Never auto-adds.
+
+### `work_log`
+
+Daily time ledger at `work/log/YYYY-MM-DD.md`.
+
+| `op` | What |
+|------|------|
+| `event` | Append a timestamped event. Pass `key` only when the user supplied it — never infer. |
+| `review` | Derive 15m activity buckets, harvest today's git commits, fetch **your** Jira worklogs for the day, flag overlaps. |
+| `push` | Post native Jira worklogs for an **explicit** `entries` array. Default is delta (`requested − already_logged`). `force=true` is the only override. Refuses if today's worklogs cannot be fetched. |
+
+Time is activity buckets, not elapsed session span. Hooks are optional.
+
+### `jira_release`
+
+User-initiated sprint releases. Needs *Manage Versions* / *Administer Projects*.
+
+| `op` | What |
+|------|------|
+| `sprints` | List sprints for a project |
+| `preview` | List a sprint's issues (no selection) |
+| `create` | Requires user-supplied `name` + `keys`. Creates an **unreleased** version, stamps `fixVersion` per key. |
+| `release` | Mark a version released (`versionId`, optional `releaseDate`) |
+
+Never invent a version name or choose issues.
+
+---
+
 ## Related
 
 - [How it works](../how-it-works.md)  

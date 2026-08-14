@@ -1,4 +1,4 @@
-import { mkdir } from "node:fs/promises";
+import { chmod, mkdir } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { applyEdits, modify } from "jsonc-parser";
 import {
@@ -8,6 +8,7 @@ import {
   resolveVaultPath,
   type BrainConfig,
 } from "./config.ts";
+import { mergeHooksJson, type HooksFile } from "./hooks-merge.ts";
 import {
   pathExists,
   readText,
@@ -116,7 +117,41 @@ async function injectCursorRules(
   // Also write project-local MCP config (Cursor often prefers this in-repo)
   const projectMcp = resolve(configDir(), ".cursor", "mcp.json");
   actions.push(await mergeCursorMcp(projectMcp, vaultPath));
+  actions.push(await mergeCursorHooks(config));
   return actions;
+}
+
+export async function mergeCursorHooks(
+  config: BrainConfig,
+): Promise<InjectAction> {
+  const hooksPath = resolve(expandHome(config.inject.cursor_hooks_file));
+  const hooksDir = join(dirname(hooksPath), "hooks");
+  await mkdir(hooksDir, { recursive: true });
+
+  const template = await readText(
+    join(configDir(), "templates", "hooks", "cursor", "work-event.sh"),
+  );
+  const scriptPath = join(hooksDir, "work-event.sh");
+  const body = template.replaceAll("__BRAIN_REPO_ROOT__", configDir());
+  await writeText(scriptPath, body);
+  await chmod(scriptPath, 0o755);
+
+  let existing: HooksFile = { version: 1, hooks: {} };
+  if (await pathExists(hooksPath)) {
+    try {
+      existing = JSON.parse(await readText(hooksPath)) as HooksFile;
+    } catch {
+      throw new Error(`Invalid JSON in ${hooksPath}`);
+    }
+  }
+  const merged = mergeHooksJson(existing, "./hooks/work-event.sh");
+  await writeText(hooksPath, `${JSON.stringify(merged, null, 2)}\n`);
+  return {
+    target: "cursor-hooks",
+    path: hooksPath,
+    action: "merged",
+    detail: "sessionStart + sessionEnd → work-event.sh (optional, fail-open)",
+  };
 }
 
 async function mergeCursorMcp(

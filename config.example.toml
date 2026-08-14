@@ -13,4 +13,7 @@ vault_path = "~/Obsidian/My Brain"
 # email_env = "JIRA_EMAIL"
 # token_env = "JIRA_API_TOKEN"
 # default_jql = "assignee = currentUser() AND statusCategory != Done AND sprint in openSprints()"
+# default_project = "AD"
+# default_issue_type = "Task"
 # For all assigned (not just sprints), agents should ask then use scope=all on tools.
+# Releases need Manage Versions / Administer Projects on the project.

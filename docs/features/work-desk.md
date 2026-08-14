@@ -11,6 +11,8 @@ Work desk is a **curated daily focus** layer: a vault checklist at `work/today.m
 | `work_today` | Vault-only today list: list / add / complete |
 | `jira_assigned` | Fetch or return cached assigned issues |
 | `work_plate` | Diff Jira snapshot vs today — **never** mutates today |
+| `work_log` | Day ledger: `event` / `review` / `push` (Jira worklogs, overlap-aware) |
+| `jira_release` | User-initiated sprint versions: `sprints` / `preview` / `create` / `release`. Needs *Manage Versions* / *Administer Projects*. |
 
 Jira is optional. Without credentials, `work_today` still works; plate/Jira tools degrade or error cleanly.
 
@@ -22,7 +24,7 @@ Jira is optional. Without credentials, `work_today` still works; plate/Jira tool
 |------|---------|
 | `work/today.md` | Curated focus checklist (`date` + `- [ ]` / `- [x]`) |
 | `work/cache/jira-assigned.json` | Machine cache (do not hand-edit) |
-| `work/log/YYYY-MM-DD.md` | Append-only day log |
+| `work/log/YYYY-MM-DD.md` | Append-only day ledger (events + optional Jira receipts) |
 
 **Rollover:** if frontmatter `date` ≠ local calendar day, completed items archive to that day’s log, open items carry forward, file restamps to today.
 
@@ -52,6 +54,9 @@ Jira is optional. Without credentials, `work_today` still works; plate/Jira tool
 | pull / refresh Jira | `jira_assigned` `refresh=true` |
 | add X to today | `work_today` `op=add` |
 | yes (to a tick-off ask) | `work_today` `op=complete` |
+| log this session / note | `work_log` `op=event` |
+| what did I do today / log to Jira | `work_log` `op=review` then `op=push` (after you confirm keys + minutes) |
+| cut a release | `jira_release` `op=sprints` → `preview` → you pick name + keys → `create` |
 
 Setup and flows: [Work desk guide](../guides/work-desk.md).
 
