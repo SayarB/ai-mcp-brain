@@ -19,9 +19,11 @@ Optional repair / ensure `.plans/` / project-local skill copy: say **setup orche
 1. Ask for the feature (skill may match without saying “run orchesto”)  
 2. Answer the PRD gate: *Does this feature need a PRD / CPO pass?*  
 3. If yes: review `prd.md` + CPO approval packet; approve or reject for revise  
-4. Review architect `plan.md` + `validations.md`; approve to unlock implementor  
-5. Implementor → reviewer; up to **3** fix rounds if `changes_required`  
-6. Read the coordinator summary  
+4. Architect: small ask → root `plan.md` + `validations.md`. Large ask may **suggest capability phases**; if you agree, every phase folder is written in one sitting (`phases.md` + `<NN>-<slug>/plan.md` + `validations.md`)  
+5. Approve the **current** plan/validations (phase 1 first when phased). That approval is the go to build **that** phase (or the unphased feature)  
+6. Implementor → reviewer against that contract; up to **3** fix rounds **per phase** if `changes_required`  
+7. On review `pass` with later phases remaining: **stop**. Approve the next phase’s plan when you want it built. Do not expect auto-start  
+8. Read the coordinator summary when the last phase (or unphased feature) passes  
 
 ## Brainstorm
 
@@ -45,6 +47,7 @@ Brainstormer is never auto-offered.
 - A lone PR review → `resolve_action action=pr-review` (or seat reviewer only if you ask)  
 - Whole-repo vulnerability hunts as part of shipping → use **auditor**  
 - Skipping approval gates “because the ask was build X”  
+- Letting an agent auto-start the next capability phase after review `pass`  
 
 ## Related
 

@@ -42,7 +42,7 @@ When the user asks to **plan** something: write/update a markdown file under **`
 
 Orchesto ships with Hem Vault install (`setup` / `inject` writes the global skill). **No separate “setup orchesto” prompt is required** to use it.
 
-Day-to-day: ship a feature — the skill matches. Always ask whether a PRD/CPO pass is needed before architect.
+Day-to-day: ship a feature — the skill matches. Always ask whether a PRD/CPO pass is needed before architect. Architect may suggest **capability phases** on a large ask; after agree, all phase plans are written in one sitting. Approving a phase’s `plan.md` / `validations.md` is the go to build **that** phase. Implementor and reviewer use the current phase folder. **Do not auto-start** the next phase.
 
 Repair / reinstall / ensure `.plans/` / optional project-local skill: when the user asks to **setup orchesto**, call MCP `read_note` on `workflows/global/setup-orchesto.md` and follow it. **Do not web-search.** Orchesto ≠ Orca/orca-cli.
 

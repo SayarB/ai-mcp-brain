@@ -39,7 +39,7 @@ Quote paths with spaces. Avoid iCloud/`Mobile Documents` if the editor sandbox r
 
 Then: open vault in Obsidian → restart editors → MCP `vault_info` → `readable: true`.
 
-**Orchesto:** installed out of the box with Hem Vault (global skill + vault personas). No separate **setup orchesto** prompt needed to ship features. See [`templates/skills/orchesto/`](templates/skills/orchesto/). Orchesto always asks whether a **CPO / PRD** pass is needed before planning. Optional: ask to **brainstorm** first (conversation seat before CPO/architect). Repair / per-repo extras: `read_note` vault `workflows/global/setup-orchesto.md`.
+**Orchesto:** installed out of the box with Hem Vault (global skill + vault personas). No separate **setup orchesto** prompt needed to ship features. See [`templates/skills/orchesto/`](templates/skills/orchesto/). Orchesto always asks whether a **CPO / PRD** pass is needed before planning. On a large ask the architect may split into **capability phases**; the next phase starts only when you approve that phase’s plan. Optional: ask to **brainstorm** first (conversation seat before CPO/architect). Repair / per-repo extras: `read_note` vault `workflows/global/setup-orchesto.md`.
 
 **Brainstormer:** ask the agent to **brainstorm** / seat **brainstormer** — it should `read_note` vault `workflows/global/persona-brainstormer.md`, grill until the product idea is clearer and stronger, and only on proceed write `.plans/<slug>/brainstorm.md` then continue Orchesto (standalone conversation seat; not a fixed pipeline step).
 

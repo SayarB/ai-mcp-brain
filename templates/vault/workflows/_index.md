@@ -5,9 +5,9 @@
 | setup-orchesto | `workflows/global/setup-orchesto.md` | Repair / reinstall Orchesto; ensure personas + `.plans/` (skill ships with INSTALL) |
 | orchesto-skill-template | `workflows/global/orchesto-skill-template.md` | SKILL.md body for global (or optional project) install |
 | persona-cpo | `workflows/global/persona-cpo.md` | Optional Orchesto seat: PRD / product requirements |
-| persona-architect | `workflows/global/persona-architect.md` | Orchesto seat: plan + validations |
-| persona-implementor | `workflows/global/persona-implementor.md` | Orchesto seat: build against plan/validations |
-| persona-reviewer | `workflows/global/persona-reviewer.md` | Orchesto seat: review against validations |
+| persona-architect | `workflows/global/persona-architect.md` | Orchesto seat: plan + validations (optional capability phases) |
+| persona-implementor | `workflows/global/persona-implementor.md` | Orchesto seat: build against current plan contract |
+| persona-reviewer | `workflows/global/persona-reviewer.md` | Orchesto seat: review against current validations |
 | persona-brainstormer | `workflows/global/persona-brainstormer.md` | Standalone conversation seat: grill until the product idea is better, before CPO/architect |
 | persona-auditor | `workflows/global/persona-auditor.md` | Standalone: holistic repo/area audit (not Orchesto) |
 
