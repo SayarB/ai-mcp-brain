@@ -102,7 +102,7 @@ Orchesto personas (`persona-cpo` optional / `persona-architect` / `persona-imple
 
 ### Brainstormer (standalone conversation persona)
 
-`persona-brainstormer` is **not** a fixed Orchesto pipeline step. When the user asks to brainstorm / seat brainstormer / talk through an idea: `read_note` `workflows/global/persona-brainstormer.md` (project overlay if present), seat it, and stay in **multi-turn conversation** (critical / objective tech-manager). Do not ticket-close. On proceed-yes: write `.plans/<slug>/brainstorm.md` handoff brief, then continue Orchesto (PRD gate if unanswered). No required artifact mid-conversation.
+`persona-brainstormer` is **not** a fixed Orchesto pipeline step. When the user asks to brainstorm / seat brainstormer / talk through an idea: `read_note` `workflows/global/persona-brainstormer.md` (project overlay if present), seat it, and stay in **multi-turn grilling** whose only job is a better product/change idea (every question must improve the idea; recommended answers; user decides). Do not ticket-close. On proceed-yes: write `.plans/<slug>/brainstorm.md` handoff brief, then continue Orchesto (PRD gate if unanswered). No required artifact mid-conversation.
 
 ### Auditor (standalone persona)
 

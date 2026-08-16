@@ -15,7 +15,7 @@ It is for shipping a feature end-to-end with plan, validations, and review — n
 
 | Seat | Role | In Orchesto? |
 |------|------|--------------|
-| **Brainstormer** | Critical multi-turn conversation; handoff brief on proceed | Optional pre-step (user-invoked only) |
+| **Brainstormer** | Sharpens the product/change idea (design-tree grill; every question must improve it); handoff brief on proceed | Optional pre-step (user-invoked only) |
 | **CPO** | PRD / product requirements | Optional (user yes at PRD gate) |
 | **Architect** | `plan.md` + `validations.md` | Required |
 | **Implementor** | Build against plan/validations | Required |

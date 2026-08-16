@@ -41,7 +41,7 @@ Then: open vault in Obsidian → restart editors → MCP `vault_info` → `reada
 
 **Orchesto:** installed out of the box with Hem Vault (global skill + vault personas). No separate **setup orchesto** prompt needed to ship features. See [`templates/skills/orchesto/`](templates/skills/orchesto/). Orchesto always asks whether a **CPO / PRD** pass is needed before planning. Optional: ask to **brainstorm** first (conversation seat before CPO/architect). Repair / per-repo extras: `read_note` vault `workflows/global/setup-orchesto.md`.
 
-**Brainstormer:** ask the agent to **brainstorm** / seat **brainstormer** — it should `read_note` vault `workflows/global/persona-brainstormer.md`, stay in critical multi-turn conversation, and only on proceed write `.plans/<slug>/brainstorm.md` then continue Orchesto (standalone conversation seat; not a fixed pipeline step).
+**Brainstormer:** ask the agent to **brainstorm** / seat **brainstormer** — it should `read_note` vault `workflows/global/persona-brainstormer.md`, grill until the product idea is clearer and stronger, and only on proceed write `.plans/<slug>/brainstorm.md` then continue Orchesto (standalone conversation seat; not a fixed pipeline step).
 
 **Auditor:** ask the agent to **audit** a repo or area — it should `read_note` vault `workflows/global/persona-auditor.md`, seat that persona, and write `.audits/<scope-slug>/report.md` (standalone; not part of Orchesto).
 

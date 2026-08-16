@@ -352,7 +352,7 @@ If Obsidian first-run UI blocks automation, give the user one short instruction 
 - Soft standing prefs → `upsert_guidance` `type=suggestion` (no magic words).
 - Do not fill binding instructions unless the user explicitly asks for hard rules.
 - **Orchesto is already installed** with this brain — ship features without a separate setup prompt. Repair / reinstall / per-repo extras: `read_note` `workflows/global/setup-orchesto.md` (do not web-search; Orchesto ≠ Orca).
-- When asked to **brainstorm** / seat **brainstormer**: `read_note` `workflows/global/persona-brainstormer.md`, seat conversation persona; on proceed write `.plans/<slug>/brainstorm.md` then continue Orchesto. Not a fixed pipeline step / not CPO.
+- When asked to **brainstorm** / seat **brainstormer**: `read_note` `workflows/global/persona-brainstormer.md`, seat conversation persona, grill with questions that improve the product idea; on proceed write `.plans/<slug>/brainstorm.md` then continue Orchesto. Not a fixed pipeline step / not CPO.
 - When asked to **audit** a repo/area: `read_note` `workflows/global/persona-auditor.md`, seat auditor, write `.audits/<scope-slug>/report.md` (ensure `.audits/` gitignored). Not Orchesto / not PR reviewer.
 
 ### Done criteria

@@ -50,7 +50,7 @@ Global skill paths: `~/.cursor/skills/orchesto/`, `~/.agents/skills/orchesto/`, 
 
 ## Brainstormer (conversation persona)
 
-When the user asks to **brainstorm** / seat **brainstormer** / talk through an idea: `read_note` `workflows/global/persona-brainstormer.md` (project overlay if present), seat that persona, and stay in multi-turn critical conversation. Do not auto-seat. On proceed-yes: write `.plans/<slug>/brainstorm.md`, then continue Orchesto (PRD gate if unanswered). Brainstormer is **not** a fixed Orchesto pipeline step and is **not** CPO/architect.
+When the user asks to **brainstorm** / seat **brainstormer** / talk through an idea: `read_note` `workflows/global/persona-brainstormer.md` (project overlay if present), seat that persona, and stay in multi-turn grilling whose only job is a better product/change idea (every question must improve the idea). Do not auto-seat. On proceed-yes: write `.plans/<slug>/brainstorm.md`, then continue Orchesto (PRD gate if unanswered). Brainstormer is **not** a fixed Orchesto pipeline step and is **not** CPO/architect.
 
 ## Audit (auditor persona)
 

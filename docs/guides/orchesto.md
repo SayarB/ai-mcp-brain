@@ -26,7 +26,7 @@ Optional repair / ensure `.plans/` / project-local skill copy: say **setup orche
 ## Brainstorm
 
 1. Say **brainstorm** / seat **brainstormer** / talk through an idea  
-2. Stay in multi-turn critical dialogue  
+2. Stay in multi-turn grilling until the product/change idea is clearer and stronger (every question must improve it; you answer)  
 3. On proceed-yes: `.plans/<slug>/brainstorm.md`, then Orchesto (PRD ask if unanswered)  
 4. On abort: stay in seat; no CPO/architect  
 
