@@ -67,7 +67,7 @@ Tell the user:
 - Skill path(s) installed (global by default; project-local only if requested)
 - Personas: `workflows/global/persona-*.md` (per-repo overlays: `projects/<slug>/workflows/persona-*.md`)
 - Runtime: Orchesto **always asks** whether a PRD/CPO pass is needed before architect; CPO is optional
-- Optional: user may seat **brainstormer** (`persona-brainstormer`) for conversation before CPO/architect — not auto-run
+- Optional: user may seat **brainstormer** (`persona-brainstormer`) for grill + ideation before CPO/architect — not auto-run
 - Reminder: Orchesto already ships with Hem Vault install — this playbook is repair / extras
 
 ## Day-to-day (after install)

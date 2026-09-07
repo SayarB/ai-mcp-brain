@@ -55,7 +55,7 @@ All under `.plans/<feature-slug>/` (create slug from the feature; ensure `.plans
 If the user asks to **brainstorm** / seat **brainstormer** / talk through an idea before CPO or architect:
 
 1. `read_note` `workflows/global/persona-brainstormer.md` (project overlay if present)
-2. Seat brainstormer (inject persona body) — **conversation** across turns; do not ticket-close
+2. Seat brainstormer (inject persona body) — **conversation** across turns (grill, then ideate); do not ticket-close
 3. Stay until the user proceeds or aborts (per persona)
 4. On proceed-yes → continue to **0. PRD gate** (if not already answered in-thread); on abort → stop
 
