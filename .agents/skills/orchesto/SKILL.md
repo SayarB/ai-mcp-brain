@@ -126,3 +126,5 @@ Short coordinator note: what shipped, whether brainstormer/CPO/PRD was used, whe
 - Implement every phase then review once
 - Load personas outside this skill’s pipeline unless the user asks
 - Duplicate vault persona / pr-review / coding essays into this file
+- Seat a smallest-solution / lazy-code / ponytail persona, or an always-on lazy mode
+- Let implementor replace an approved plan with a smaller invention

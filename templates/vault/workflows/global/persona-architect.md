@@ -19,6 +19,7 @@ On a **large** ask, you may split work into **capability phases** that stack. Yo
 1. Confirm goal / non-goals. If an approved `.plans/<feature-slug>/prd.md` exists, treat it as the **product source of truth** — align goal/non-goals/scope with it; do not invent conflicting product requirements. **Question budget:** at most **3 blocking** clarifying questions (prefer plan/tech questions when a PRD already exists). If still open after that, write the plan with **labeled assumptions**.
 2. Skim the codebase enough to plan. **Search** for similar functions/modules before proposing new ones. Fill `## Reuse` (even if none — say what was searched).
    **Quality bar:** call existing if it already fits (no adapter soup); extend if one more case stays simple; extract only when 2+ sites would duplicate and the helper stays obvious; prefer a few duplicated lines over a flag-soup abstraction; do not add a shared util for one call site.
+   **Smallest solution:** after you understand the problem (read first — do not skip tracing the flow), stop at the first option that holds: skip this piece; already in this codebase; language or platform already does it; already-installed library; a few lines; only then new code. Never drop trust-boundary validation, data-loss error handling, security, or accessibility to make the plan smaller. Two options that both work → take the smaller and move on. Write the stop-point in `## Smallest solution`. When `Not added` names something checkable (new dependency, new wrapper type, new util module), also put a Negative check with a check method. Do not repeat blast radius (unlisted files) as a negative check. Tiny ask with nothing extra to forbid: Negative checks stay `None.`
 3. Call `resolve_action action=coding` if not already resolved this thread — follow it for *how* to plan; do not restate those rules here.
 4. **Size the body to the ask**, not the skeleton. Always use the Output `plan.md` headings. Tiny ask → short Goal, small file map, one sketched step, `None.` where empty. Do not omit headings. Do not invent a split for a tiny ask.
 5. **Split decision (larger asks):** if a single plan would mix distinct **capability** steps — nameable improvements that each build on the last — **suggest phasing in chat before writing artifacts**. Give an ordered list, **one capability sentence** per phase, and a one-line why-split. Merge adjacent slices that fail “capability sentence, not layer sentence.” Prefer few fat phases. A foundation-only phase (schema, types, wiring) is allowed **only when that is the work**, and you must say so. Else skip this step and go unphased.
@@ -50,7 +51,8 @@ On a **large** ask, you may split work into **capability phases** that stack. Yo
 - Fuzzy validations (“works well”, “is secure”, “looks good”) with no check method
 - Padding a tiny ask with long essays or whole-file sketches
 - Skipping the reuse search, or proposing new modules/helpers without `## Reuse` rows
-- Omitting `## Reuse` / `## File map` / `## Blast radius` / `## Decisions taken`
+- Omitting `## Reuse` / `## Smallest solution` / `## File map` / `## Blast radius` / `## Decisions taken`
+- A vague `## Smallest solution` (“be simple”) with no stop-point and no Not added / None.
 - Putting the reuse or decisions-taken **questions** inside `plan.md` (those asks are chat-only)
 - Starting implementor / production coding before reuse + decisions taken are accepted **and** the current plan artifacts are approved
 - Writing phase folders before the user agrees to the split
@@ -75,6 +77,10 @@ Under `.plans/<feature-slug>/`:
 ## Goal
 ## Non-goals
 ## Approach
+## Smallest solution
+- Stopped at: <skip | reuse | language/platform | installed library | few lines | new code>
+- Not added: <what we cut, and when to add it>
+- (if nothing extra was on the table) None.
 ## Reuse
 - <reuse | extend | extract | new> `<symbol>` in `<path>` — <why>
 - (if none) None. Searched: <paths>.
@@ -134,7 +140,7 @@ Under `.plans/<feature-slug>/`:
 
 Each **`<NN>-<phase-slug>/plan.md`** uses the same headings as the unphased `plan.md` template above, scoped to that phase. Each **`validations.md`** uses the same quality bar, plus Must-pass items that earlier phases **still hold** (repeat or point at those checks with a check method).
 
-**Validation quality bar:** every Must-pass / Negative item must name **how** it is checked (command, file presence/content, observable behavior, or invariant). Ban fuzzy items (“works well”, “is secure”, “code is clean”).
+**Validation quality bar:** every Must-pass / Negative item must name **how** it is checked (command, file presence/content, observable behavior, or invariant). Ban fuzzy items (“works well”, “is secure”, “code is clean”). When `## Smallest solution` lists a checkable skip (new dependency, new wrapper type, new util module), encode it as a Negative check. Do not duplicate blast radius. Tiny ask with nothing extra to forbid: Negative checks `None.`
 
 ### Approval packet (required in chat after new or materially updated plan)
 
@@ -143,7 +149,7 @@ Questions in **5** and **6** are **chat-only**. Do not put them inside `plan.md`
 **Unphased** — reply with all of:
 
 1. **Links** to `.plans/<feature-slug>/plan.md` and `.plans/<feature-slug>/validations.md`
-2. **Structured summary** of the plan (short): Goal · Non-goals (if any) · Approach/steps · Key surfaces · Reuse · Decisions taken · Assumptions/risks
+2. **Structured summary** of the plan (short): Goal · Non-goals (if any) · Approach/steps · Smallest solution · Key surfaces · Reuse · Decisions taken · Assumptions/risks
 3. **Validations list** — the Must-pass (and Negative checks) items that must be performed, including their check methods
 4. **Explicit ask** for approval before implementation starts (that approval is the go to build)
 5. **Reuse** — list the `## Reuse` rows. Ask: these are the reuse things we are using; is this fine, or do you want changes?
@@ -160,7 +166,7 @@ Questions in **5** and **6** are **chat-only**. Do not put them inside `plan.md`
 
 ## Done when
 
-- Artifacts exist and are consistent with unphased **or** phased rules; body depth matches ask size; required `plan.md` headings are present
+- Artifacts exist and are consistent with unphased **or** phased rules; body depth matches ask size; required `plan.md` headings are present (including `## Smallest solution` with a stop-point and Not added / None.)
 - Every Must-pass / Negative item is testable via a named check method
 - If phased: `phases.md` exists, every listed folder has `plan.md` + `validations.md`, no root plan pair, capability-sentence test held (or a required foundation-only phase is labeled)
 - Blocking unknowns are either resolved (≤3 questions) or listed as labeled assumptions
@@ -173,5 +179,5 @@ Questions in **5** and **6** are **chat-only**. Do not put them inside `plan.md`
 
 ## Flags
 
-- **Blocking:** missing goal; unsafe assumption; no way to validate success; fuzzy validations; skipped reuse search; omitted `## Reuse` / `## File map` / `## Blast radius` / `## Decisions taken`; omitted reuse/decisions-taken chat questions; proceeding to implement without approval or before reuse + decisions taken are accepted; auto-starting a later phase; phase folders written before agree; skinny layer-cake split without a capability sentence
+- **Blocking:** missing goal; unsafe assumption; no way to validate success; fuzzy validations; skipped reuse search; omitted `## Reuse` / `## Smallest solution` / `## File map` / `## Blast radius` / `## Decisions taken`; vague smallest-solution with no stop-point; omitted reuse/decisions-taken chat questions; proceeding to implement without approval or before reuse + decisions taken are accepted; auto-starting a later phase; phase folders written before agree; skinny layer-cake split without a capability sentence
 - **Non-blocking:** optional polish; nice-to-have follow-ups; long body on a small ask (waste, not failure)
