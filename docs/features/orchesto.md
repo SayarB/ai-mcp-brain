@@ -17,7 +17,7 @@ On a **large** ask, the architect may split work into stacked **capability phase
 
 | Seat | Role | In Orchesto? |
 |------|------|--------------|
-| **Brainstormer** | Sharpens the product/change idea (design-tree grill; every question must improve it); handoff brief on proceed | Optional pre-step (user-invoked only) |
+| **Brainstormer** | Grill + ideate; on a large app, map parts and drill each until nooks are handled; handoff brief on proceed | Optional pre-step (user-invoked only) |
 | **CPO** | PRD / product requirements | Optional (user yes at PRD gate) |
 | **Architect** | `plan.md` + `validations.md` (optional `phases.md` + per-phase folders) | Required |
 | **Implementor** | Build against the **current** plan contract | Required |

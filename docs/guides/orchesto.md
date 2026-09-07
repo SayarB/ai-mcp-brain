@@ -28,9 +28,10 @@ Optional repair / ensure `.plans/` / project-local skill copy: say **setup orche
 ## Brainstorm
 
 1. Say **brainstorm** / seat **brainstormer** / talk through an idea  
-2. Stay in multi-turn grilling until the product/change idea is clearer and stronger (every question must improve it; you answer)  
-3. On proceed-yes: `.plans/<slug>/brainstorm.md`, then Orchesto (PRD ask if unanswered)  
-4. On abort: stay in seat; no CPO/architect  
+2. Grill until the idea is clear (questions that improve it; you answer). On a **large app**, map parts and go deep on each (nooks, edges, seams) — not surface-only.  
+3. Then **ideate**: discussion with new ideas, products, and methods (on ask and unprompted) **per part** as well as whole.  
+4. On proceed-yes: `.plans/<slug>/brainstorm.md`, then Orchesto (PRD ask if unanswered)  
+5. On abort: stay in seat; no CPO/architect  
 
 Brainstormer is never auto-offered.
 
