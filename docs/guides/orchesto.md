@@ -32,9 +32,9 @@ In chat: **sync orchesto** / **update orchesto personas** / **setup orchesto** �
 1. Ask for the feature (skill may match without saying “run orchesto”)  
 2. Answer the PRD gate: *Does this feature need a PRD / CPO pass?*  
 3. If yes: review `prd.md` + CPO approval packet; approve or reject for revise  
-4. Architect: small ask → root `plan.md` + `validations.md`. Large ask may **suggest capability phases**; if you agree, every phase folder is written in one sitting (`phases.md` + `<NN>-<slug>/plan.md` + `validations.md`)  
+4. Architect: small ask → root `plan.md` + `validations.md` (includes `## Smallest solution`). Large ask may **suggest capability phases**; if you agree, every phase folder is written in one sitting (`phases.md` + `<NN>-<slug>/plan.md` + `validations.md`)  
 5. Approve the **current** plan/validations (phase 1 first when phased). That approval is the go to build **that** phase (or the unphased feature)  
-6. Implementor → reviewer against that contract; up to **3** fix rounds **per phase** if `changes_required`  
+6. Implementor → reviewer against that contract (reviewer also checks extras vs the plan); up to **3** fix rounds **per phase** if `changes_required`  
 7. On review `pass` with later phases remaining: **stop**. Approve the next phase’s plan when you want it built. Do not expect auto-start  
 8. Read the coordinator summary when the last phase (or unphased feature) passes  
 

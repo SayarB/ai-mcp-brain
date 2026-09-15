@@ -75,6 +75,7 @@ Auditor writes `.audits/<scope-slug>/report.md` separately.
 - Optional capability phasing on large asks (all phase plans in one architect sitting)  
 - Per-phase implementation and review; 3-round fix cap **per phase**  
 - Validation-driven review with `pass` / `changes_required`  
+- Architect records `## Smallest solution`; reviewer fails extras not in the plan  
 - Per-repo persona overlays without changing the skill DAG  
 - Standalone auditor; standalone `resolve_action` still works without Orchesto  
 

@@ -137,3 +137,5 @@ Short coordinator note: what shipped, whether brainstormer/CPO/PRD was used, whe
 - Load personas outside this skill’s pipeline unless the user asks
 - Duplicate persona / pr-review / coding essays into this file
 - Read every file under `references/` up front
+- Seat a smallest-solution / lazy-code / ponytail persona, or an always-on lazy mode
+- Let implementor replace an approved plan with a smaller invention
