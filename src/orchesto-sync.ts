@@ -104,15 +104,18 @@ export async function syncOrchestoVaultPersonas(
       continue;
     }
 
+    // Overwrite only on first install (no meta file) or when dest still
+    // matches the last installed hash. A present meta file with a missing
+    // hash is treated as a local edit — never as bootstrap.
     const unmodified = Boolean(lastHash) && sha256Text(destBody!) === lastHash;
-    if (bootstrap || unmodified || !lastHash) {
+    if (bootstrap || unmodified) {
       await writeText(dest, packBody);
       meta.personas[rel] = packHash;
       actions.push({
         target: "orchesto-persona",
         path: dest,
         action: "updated",
-        detail: bootstrap || !lastHash ? "bootstrap overwrite" : "unmodified seed",
+        detail: bootstrap ? "bootstrap overwrite" : "unmodified seed",
       });
       continue;
     }
