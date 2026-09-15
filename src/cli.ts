@@ -26,7 +26,8 @@ Primary (use this to install):
 
 Advanced:
   init [--path <dir>]     Vault folders only
-  inject [--target <t>]   Harness MCP/rules only
+  inject [--target <t>]   Harness MCP/rules + Orchesto pack + vault persona sync
+                          (Hem: run after git pull of this clone to update Orchesto)
   ingest                  (planned) promote external/ drops
   work-event              Append a day-log event (harness-agnostic capture)
   help

@@ -39,7 +39,7 @@ Quote paths with spaces. Avoid iCloud/`Mobile Documents` if the editor sandbox r
 
 Then: open vault in Obsidian → restart editors → MCP `vault_info` → `readable: true`.
 
-**Orchesto:** installed out of the box with Hem Vault (global skill + vault personas). No separate **setup orchesto** prompt needed to ship features. See [`templates/skills/orchesto/`](templates/skills/orchesto/). Orchesto always asks whether a **CPO / PRD** pass is needed before planning. On a large ask the architect may split into **capability phases**; the next phase starts only when you approve that phase’s plan. Optional: ask to **brainstorm** first (conversation seat before CPO/architect). Repair / per-repo extras: `read_note` vault `workflows/global/setup-orchesto.md`.
+**Orchesto:** standalone skill pack at [`skills/orchesto/`](skills/orchesto/). Hem install copies it globally and safe-syncs vault personas. No separate **setup orchesto** prompt needed to ship features. Skill-only: `npx skills add SayarB/ai-mcp-brain --skill orchesto -g` then `npx skills update orchesto -g`. Hem: after `git pull` of this clone, `npm run brain -- inject` (`git pull` alone does not update Obsidian). Post-push `restart-mcp.sh` runs inject. In chat: **sync orchesto** / **update orchesto personas**. Orchesto always asks whether a **CPO / PRD** pass is needed before planning. On a large ask the architect may split into **capability phases**; the next phase starts only when you approve that phase’s plan. Optional: ask to **brainstorm** first.
 
 **Brainstormer:** ask the agent to **brainstorm** / seat **brainstormer** — it should `read_note` vault `workflows/global/persona-brainstormer.md`, grill until the idea is clear, then ideate (new ideas, products, methods). On a large app it should map parts and go deep on each until nooks are handled. Only on proceed write `.plans/<slug>/brainstorm.md` then continue Orchesto (standalone conversation seat; not a fixed pipeline step).
 
@@ -55,7 +55,7 @@ Then: open vault in Obsidian → restart editors → MCP `vault_info` → `reada
 
 Inject prefers **Bun** for the MCP command when available; otherwise **Node + `tsx`**. Env: `BRAIN_VAULT` overrides vault path.
 
-After cloning this repo, enable git hooks once so **post-push restarts local MCP**:
+After cloning this repo, enable git hooks once so **post-push injects Orchesto into the vault and restarts local MCP**:
 
 ```bash
 git config core.hooksPath .githooks
