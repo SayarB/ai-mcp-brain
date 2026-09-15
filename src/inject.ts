@@ -14,8 +14,10 @@ import {
   readText,
   resolveMcpLaunch,
   writeText,
+  globFiles,
   type McpLaunch,
 } from "./runtime.ts";
+import { syncOrchestoVaultPersonas } from "./orchesto-sync.ts";
 
 export type InjectTarget = "cursor" | "claude" | "codex" | "zed" | "all";
 
@@ -313,61 +315,71 @@ async function mergeZedSettings(
   };
 }
 
-/** Global Orchesto skill paths (user-level harness adapters). */
-export function orchestoGlobalSkillPaths(target: InjectTarget = "all"): string[] {
-  const paths: string[] = [];
+/** Global Orchesto skill directories (user-level harness adapters). */
+export function orchestoGlobalSkillDirs(target: InjectTarget = "all"): string[] {
+  const dirs: string[] = [];
   const doCursor = target === "all" || target === "cursor";
   const doClaude = target === "all" || target === "claude";
-  // Zed / Codex / OpenCode-style agents path
   const doAgents =
     target === "all" || target === "zed" || target === "codex";
 
-  if (doCursor) paths.push(expandHome("~/.cursor/skills/orchesto/SKILL.md"));
-  if (doAgents) paths.push(expandHome("~/.agents/skills/orchesto/SKILL.md"));
-  if (doClaude) paths.push(expandHome("~/.claude/skills/orchesto/SKILL.md"));
-  return paths;
+  if (doCursor) dirs.push(expandHome("~/.cursor/skills/orchesto"));
+  if (doAgents) dirs.push(expandHome("~/.agents/skills/orchesto"));
+  if (doClaude) dirs.push(expandHome("~/.claude/skills/orchesto"));
+  return dirs;
 }
 
-async function loadOrchestoSkillBody(): Promise<string> {
-  const skillPath = join(configDir(), "templates", "skills", "orchesto", "SKILL.md");
-  const body = await readText(skillPath);
-  return body.endsWith("\n") ? body : `${body}\n`;
+/** Global Orchesto SKILL.md paths (user-level harness adapters). */
+export function orchestoGlobalSkillPaths(target: InjectTarget = "all"): string[] {
+  return orchestoGlobalSkillDirs(target).map((dir) => join(dir, "SKILL.md"));
 }
 
-async function installOrchestoSkillFile(
-  destPath: string,
-  skillBody: string,
-): Promise<InjectAction> {
-  await mkdir(dirname(destPath), { recursive: true });
-  const existed = await pathExists(destPath);
-  if (existed) {
-    const existing = await readText(destPath);
-    if (existing === skillBody) {
-      return {
-        target: "orchesto-skill",
-        path: destPath,
-        action: "skipped",
-        detail: "unchanged",
-      };
+export function orchestoPackDir(): string {
+  return join(configDir(), "skills", "orchesto");
+}
+
+export async function copyOrchestoPack(
+  srcDir: string,
+  destDir: string,
+): Promise<InjectAction[]> {
+  const files = await globFiles(srcDir, "**/*");
+  const actions: InjectAction[] = [];
+  for (const rel of files) {
+    const src = join(srcDir, rel);
+    const dest = join(destDir, rel);
+    const incoming = await readText(src);
+    const existed = await pathExists(dest);
+    if (existed) {
+      const existing = await readText(dest);
+      if (existing === incoming) {
+        actions.push({
+          target: "orchesto-skill",
+          path: dest,
+          action: "skipped",
+          detail: "unchanged",
+        });
+        continue;
+      }
     }
+    await writeText(dest, incoming);
+    actions.push({
+      target: "orchesto-skill",
+      path: dest,
+      action: existed ? "updated" : "wrote",
+      detail: "orchesto pack file",
+    });
   }
-  await writeText(destPath, skillBody);
-  return {
-    target: "orchesto-skill",
-    path: destPath,
-    action: existed ? "updated" : "wrote",
-    detail: "global Orchesto skill",
-  };
+  return actions;
 }
 
-/** Install Orchesto SKILL.md into global harness skill dirs (idempotent). */
+/** Install Orchesto skill pack into global harness skill dirs (idempotent). */
 export async function installOrchestoSkills(
   target: InjectTarget = "all",
 ): Promise<InjectAction[]> {
-  const skillBody = await loadOrchestoSkillBody();
+  const src = orchestoPackDir();
   const actions: InjectAction[] = [];
-  for (const dest of orchestoGlobalSkillPaths(target)) {
-    actions.push(await installOrchestoSkillFile(dest, skillBody));
+  for (const destDir of orchestoGlobalSkillDirs(target)) {
+    actions.push(...(await copyOrchestoPack(src, destDir)));
   }
   return actions;
 }
@@ -418,8 +430,11 @@ export async function injectHarnesses(
     actions.push(...(await injectZed(config, policy, vaultPath)));
   }
 
-  // Orchesto ships with the brain — global harness skill adapters
+  // Orchesto ships with the brain — global pack + vault persona safe-sync
   actions.push(...(await installOrchestoSkills(target)));
+  actions.push(
+    ...(await syncOrchestoVaultPersonas(vaultPath, orchestoPackDir())),
+  );
 
   return { vaultPath, actions };
 }

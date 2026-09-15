@@ -10,8 +10,9 @@ On a **large** ask, the architect may split work into stacked **capability phase
 
 | Owned by | What |
 |----------|------|
-| **Vault (MCP)** | Persona bodies, setup/repair playbook, skill template note, coding/PR process via `resolve_action` |
-| **Global skill** | Pipeline procedure only — who seats when, gates, artifact paths, per-phase fix-loop cap (installed by `setup` / `inject`) |
+| **Skill pack** (`skills/orchesto/`) | DAG (`SKILL.md`) + default persona bodies (`references/`). Installable without a vault. |
+| **Vault (MCP)** | Optional overlays (`workflows/global/` + `projects/<slug>/workflows/`), setup/repair playbook, coding/PR process via `resolve_action` |
+| **Global skill dirs** | Copy of the pack via `inject` / `npx skills add … -g` |
 
 ## Personas
 
@@ -24,7 +25,7 @@ On a **large** ask, the architect may split work into stacked **capability phase
 | **Reviewer** | Change gate vs current validations → `review-report.md` | Required |
 | **Auditor** | Holistic repo/area audit → `.audits/` | Standalone (not Orchesto) |
 
-Personas are workflows under `workflows/global/` (project overlays win). They are **not** `resolve_action` ids.
+Personas ship in the skill pack (`references/persona-*.md`). Hem vault copies are overlays (project wins, then global). They are **not** `resolve_action` ids.
 
 ## How it works
 
@@ -83,8 +84,8 @@ See [Orchesto guide](../guides/orchesto.md) for setup, ship, brainstorm, and aud
 
 **Quick phrases**
 
-- Ship a feature end-to-end — skill matches (installed with Hem Vault); answer the PRD ask  
-- **setup orchesto** — optional repair / ensure `.plans/` / project-local skill copy  
+- Ship a feature end-to-end — skill matches; answer the PRD ask  
+- **sync orchesto** / **update orchesto personas** / **setup orchesto** — inject pack + vault persona sync  
 - **brainstorm** / seat **brainstormer** — conversation seat (never auto)  
 - **audit** — standalone auditor  
 
@@ -93,7 +94,9 @@ See [Orchesto guide](../guides/orchesto.md) for setup, ship, brainstorm, and aud
 - Never web-search for Orchesto setup — vault playbook only  
 - Brainstormer and CPO are never auto-seated without an explicit user yes  
 - PRD ask is mandatory before architect (hinting OK; skipping not)  
-- Default skill home is **global** (`~/.cursor/skills`, `~/.agents/skills`, `~/.claude/skills`) — project-local copies are optional  
+- Default skill home is **global** (`~/.cursor/skills`, `~/.agents/skills`, `~/.claude/skills`)  
+- `npx skills update orchesto -g` updates the skill dirs, not Obsidian  
+- Hem: `git pull` of this clone then `brain inject`; post-push `restart-mcp.sh` injects  
 - Reviewer ≠ auditor  
 - After 3 failed review rounds **on a phase**: stop; summarize blockers; do not start the next phase  
 - Do **not** auto-start the next phase after `pass`  
@@ -104,4 +107,4 @@ See [Orchesto guide](../guides/orchesto.md) for setup, ship, brainstorm, and aud
 - [Orchesto guide](../guides/orchesto.md)  
 - [Guidance system](guidance.md)  
 - Vault: `workflows/global/setup-orchesto.md`, `persona-*.md`  
-- Contributor skill: `templates/skills/orchesto/`  
+- Canonical pack: [`skills/orchesto/`](../../skills/orchesto/)  

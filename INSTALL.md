@@ -307,20 +307,21 @@ Skip only harnesses the user explicitly does not use **and** that are not instal
 
 Orchesto ships with Hem Vault. **Do this during install** — do not tell the user to run a separate “setup orchesto” prompt later.
 
-`bun run setup` / `npm run setup` (and `brain inject`) already install the global skill. If you used the manual path in step 6, install it now:
+`bun run setup` / `npm run setup` (and `brain inject`) already copy the **skill directory** and safe-sync vault personas. If you used the manual path in step 6, install it now:
 
-1. Read skill body from `<repo>/templates/skills/orchesto/SKILL.md` (same text as vault `workflows/global/orchesto-skill-template.md`).
-2. Write that body (including YAML frontmatter) to the **global** harness skill paths that match wired harnesses:
+1. Copy the pack from `<repo>/skills/orchesto/` (entire directory: `SKILL.md` + `references/persona-*.md` + README) into the **global** harness skill dirs that match wired harnesses:
 
-| Harness | Global skill path |
-|---------|-------------------|
-| Cursor | `~/.cursor/skills/orchesto/SKILL.md` |
-| Zed / Codex / OpenCode-style | `~/.agents/skills/orchesto/SKILL.md` |
-| Claude Code | `~/.claude/skills/orchesto/SKILL.md` |
+| Harness | Global skill directory |
+|---------|------------------------|
+| Cursor | `~/.cursor/skills/orchesto/` |
+| Zed / Codex / OpenCode-style | `~/.agents/skills/orchesto/` |
+| Claude Code | `~/.claude/skills/orchesto/` |
 
-3. Create parent dirs as needed. If a target file already exists and differs, prefer updating to the template on a fresh install; on re-inject, overwrite only if content differs (idempotent skip when identical).
-4. Personas are already in the vault from step 6 (`workflows/global/persona-*.md`). Do not web-search; Orchesto ≠ Orca.
-5. Product repos still need `.plans/` (gitignored) when shipping a feature — the skill creates that on first use. Optional repair playbook: vault `workflows/global/setup-orchesto.md`.
+2. Create parent dirs as needed. If a target file already exists and differs, prefer updating to the pack on a fresh install; on re-inject, overwrite pack files that differ (idempotent skip when identical).
+3. Safe-sync vault `workflows/global/persona-{brainstormer,cpo,architect,implementor,reviewer}.md` from `skills/orchesto/references/` (unmodified take upstream; local edits skipped). Do not web-search; Orchesto ≠ Orca.
+4. Product repos still need `.plans/` (gitignored) when shipping a feature — the skill creates that on first use. Repair / sync: `npm run brain -- inject` from this clone, or vault `workflows/global/setup-orchesto.md`.
+
+Skill-only testers (no vault): `npx skills add SayarB/ai-mcp-brain --skill orchesto -g` and later `npx skills update orchesto -g`.
 
 #### 10. Open vault in Obsidian
 
@@ -339,7 +340,7 @@ If Obsidian first-run UI blocks automation, give the user one short instruction 
 - `actions/registry.md` exists.
 - Empty-ish shells for kinds `coding`, `pr-review`, `commit`, `git` under both `instructions/global/` and `suggestions/global/`.
 - MCP config uses absolute paths + `BRAIN_VAULT`.
-- Orchesto global skill present for wired harnesses (e.g. `~/.cursor/skills/orchesto/SKILL.md` and/or `~/.agents/skills/orchesto/SKILL.md`).
+- Orchesto global skill **directory** present for wired harnesses (e.g. `~/.cursor/skills/orchesto/SKILL.md` **and** `~/.cursor/skills/orchesto/references/persona-architect.md`).
 - Vault has Orchesto personas under `workflows/global/persona-*.md`.
 - Obsidian installed (or user declined) and vault path known.
 - Tell the user to **restart / reload** the coding agent/editor, then run MCP tool `vault_info` → expect `readable: true`.
@@ -351,8 +352,9 @@ If Obsidian first-run UI blocks automation, give the user one short instruction 
 - Project guidance precedes global.
 - Soft standing prefs → `upsert_guidance` `type=suggestion` (no magic words).
 - Do not fill binding instructions unless the user explicitly asks for hard rules.
-- **Orchesto is already installed** with this brain — ship features without a separate setup prompt. Repair / reinstall / per-repo extras: `read_note` `workflows/global/setup-orchesto.md` (do not web-search; Orchesto ≠ Orca).
-- When asked to **brainstorm** / seat **brainstormer**: `read_note` `workflows/global/persona-brainstormer.md`, seat conversation persona, grill until the idea is clear then ideate (ideas, products, methods); on a large app map parts and go deep per part; on proceed write `.plans/<slug>/brainstorm.md` then continue Orchesto. Not a fixed pipeline step / not CPO.
+- **Orchesto is already installed** with this brain — ship features without a separate setup prompt. After `git pull` of this clone, run `npm run brain -- inject` to copy personas into the vault (`git pull` alone is not enough). Post-push `scripts/restart-mcp.sh` also runs inject. Repair: `read_note` `workflows/global/setup-orchesto.md` (do not web-search; Orchesto ≠ Orca).
+- When asked to **brainstorm** / seat **brainstormer**: follow the Orchesto skill (vault overlay if MCP is up, else `references/persona-brainstormer.md`). Not a fixed pipeline step / not CPO.
+- When asked to **sync orchesto** / **update orchesto personas**: run `npm run brain -- inject` from this clone.
 - When asked to **audit** a repo/area: `read_note` `workflows/global/persona-auditor.md`, seat auditor, write `.audits/<scope-slug>/report.md` (ensure `.audits/` gitignored). Not Orchesto / not PR reviewer.
 
 ### Done criteria
@@ -374,15 +376,17 @@ Report:
 
 ## Orchesto (included with install)
 
-Orchesto is installed **during** Hem Vault setup (global skill + vault personas). Users do **not** need a separate “setup orchesto” prompt for day-to-day use.
+Orchesto is a **standalone Agent Skill**. Hem Vault install copies the pack and safe-syncs personas. Users do **not** need a separate “setup orchesto” prompt for day-to-day use.
 
 | Piece | Where |
 |-------|--------|
-| Global skill | `~/.cursor/skills/orchesto/`, `~/.agents/skills/orchesto/`, `~/.claude/skills/orchesto/` (as applicable) |
-| Personas + playbook | Vault `workflows/global/persona-*.md`, `setup-orchesto.md` |
-| Contributor template | [`templates/skills/orchesto/`](templates/skills/orchesto/) (kept in sync with vault `orchesto-skill-template.md`) |
+| Canonical pack | [`skills/orchesto/`](skills/orchesto/) (`SKILL.md` + `references/persona-*.md`) |
+| Global skill dirs | `~/.cursor/skills/orchesto/`, `~/.agents/skills/orchesto/`, `~/.claude/skills/orchesto/` (as applicable) |
+| Vault personas | `workflows/global/persona-*.md` (safe-synced by inject; project overlays never overwritten) |
+| Skill-only install / update | `npx skills add SayarB/ai-mcp-brain --skill orchesto -g` then `npx skills update orchesto -g` |
+| Hem update | `git pull` this clone, then `npm run brain -- inject`. Post-push `restart-mcp.sh` runs inject. `git pull` of the clone does **not** update Obsidian by itself. |
 
-Optional: say **setup orchesto** in a product repo to repair the global skill, ensure personas, ensure `.plans/` is gitignored, or install an optional **project-local** skill copy for per-repo DAG edits. Agent follows `workflows/global/setup-orchesto.md`.
+In chat: **sync orchesto** / **update orchesto personas** / **setup orchesto** → `brain inject` from this checkout. Agent follows `workflows/global/setup-orchesto.md`.
 
 ---
 
@@ -403,12 +407,12 @@ When you change **how install works** on a new machine, update **all** of the fo
 | [`UNINSTALL.md`](UNINSTALL.md) | Agent/human uninstall prompt — reverse of harness wiring |
 | [`src/setup.ts`](src/setup.ts) | One-shot: config + init + inject |
 | [`src/init.ts`](src/init.ts) / [`src/vault-layout.ts`](src/vault-layout.ts) | Vault seed dirs + template copy |
-| [`src/inject.ts`](src/inject.ts) / [`src/runtime.ts`](src/runtime.ts) | Harness MCP launch (Bun or Node+tsx) |
+| [`src/inject.ts`](src/inject.ts) / [`src/runtime.ts`](src/runtime.ts) / [`src/orchesto-sync.ts`](src/orchesto-sync.ts) | Harness MCP launch; Orchesto pack copy; vault persona safe-sync |
+| [`skills/orchesto/`](skills/orchesto/) | Canonical Orchesto skill pack (global install via inject / skills.sh) |
 | [`templates/vault/`](templates/vault/) | What a fresh vault contains (includes persona workflows) |
-| [`templates/skills/orchesto/`](templates/skills/orchesto/) | Orchesto skill template (global install via inject) + setup README |
 | [`templates/prompts/memory-policy.md`](templates/prompts/memory-policy.md) | Injected slim policy |
 | [`package.json`](package.json) scripts | `setup` / `brain` / `mcp` / `restart-mcp` entrypoints |
-| [`.githooks/post-push`](.githooks/post-push) + [`scripts/restart-mcp.sh`](scripts/restart-mcp.sh) | After push, kill local MCP so the harness respawns with new schemas (`git config core.hooksPath .githooks`) |
+| [`.githooks/post-push`](.githooks/post-push) + [`scripts/restart-mcp.sh`](scripts/restart-mcp.sh) | After push: inject Orchesto (fail-open) then kill local MCP so the harness respawns (`git config core.hooksPath .githooks`) |
 | [`config.example.toml`](config.example.toml), [`mcp.cursor.example.json`](mcp.cursor.example.json), [`.env.example`](.env.example) | Portable examples (placeholders; no secrets) |
 | [`README.md`](README.md) / [`docs/guides/getting-started.md`](docs/guides/getting-started.md) | Points here; mention greenfield agent install |
 

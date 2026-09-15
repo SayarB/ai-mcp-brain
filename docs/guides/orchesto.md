@@ -1,18 +1,31 @@
 # Guide: Orchesto
 
-## Setup (ships with Hem Vault)
+## Setup
 
-Prerequisites: ai-mcp-brain installed via [`INSTALL.md`](../../INSTALL.md) — Orchesto global skill + vault personas are included. MCP up (`vault_info` → `readable: true`).
+**Skill-only (no vault)**
+
+```bash
+npx skills add SayarB/ai-mcp-brain --skill orchesto -g
+npx skills update orchesto -g
+```
+
+Use **`-g`**. That writes user-global skill dirs (`~/.cursor/skills/orchesto`, etc.), not a product repo.
+
+**Hem Vault**
+
+Prerequisites: ai-mcp-brain installed via [`INSTALL.md`](../../INSTALL.md). Orchesto pack + vault persona safe-sync are included. MCP is optional for running the skill.
 
 No separate **setup orchesto** prompt is required for day-to-day use.
 
-| Harness | Global skill path |
-|---------|-------------------|
-| Cursor | `~/.cursor/skills/orchesto/SKILL.md` |
-| Zed / Codex-style | `~/.agents/skills/orchesto/SKILL.md` |
-| Claude Code | `~/.claude/skills/orchesto/SKILL.md` |
+| Harness | Global skill directory |
+|---------|------------------------|
+| Cursor | `~/.cursor/skills/orchesto/` |
+| Zed / Codex-style | `~/.agents/skills/orchesto/` |
+| Claude Code | `~/.claude/skills/orchesto/` |
 
-Optional repair / ensure `.plans/` / project-local skill copy: say **setup orchesto** → agent follows vault `workflows/global/setup-orchesto.md`.
+Update after you **pull this clone**: `npm run brain -- inject`. `git pull` alone does **not** update Obsidian. After **push**, `scripts/restart-mcp.sh` (post-push hook) runs inject then restarts MCP.
+
+In chat: **sync orchesto** / **update orchesto personas** / **setup orchesto** → agent follows vault `workflows/global/setup-orchesto.md` (prefer inject from the clone).
 
 ## Ship a feature
 
@@ -54,4 +67,4 @@ Brainstormer is never auto-offered.
 
 - [Orchesto feature](../features/orchesto.md)  
 - Vault: `workflows/global/setup-orchesto.md`  
-- Contributor template: `templates/skills/orchesto/`  
+- Canonical pack: [`skills/orchesto/`](../../skills/orchesto/)  
