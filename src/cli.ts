@@ -6,12 +6,25 @@ import {
   injectHarnesses,
   type InjectTarget,
 } from "./inject.ts";
+import {
+  injectOrchestoOnly,
+  removeOrchestoSkills,
+  updateOrchesto,
+} from "./orchesto-skills.ts";
 import { isMainModule, processArgs } from "./runtime.ts";
 import { runSetup } from "./setup.ts";
 import { appendEvent } from "./work/ledger.ts";
 import type { LedgerEventKind } from "./work/types.ts";
 
-type Command = "setup" | "init" | "inject" | "ingest" | "work-event" | "help";
+type Command =
+  | "setup"
+  | "init"
+  | "inject"
+  | "ingest"
+  | "work-event"
+  | "orchesto-update"
+  | "orchesto-remove"
+  | "help";
 
 function printHelp(): void {
   console.log(`brain — portable second-brain CLI (Bun or Node)
@@ -26,8 +39,10 @@ Primary (use this to install):
 
 Advanced:
   init [--path <dir>]     Vault folders only
-  inject [--target <t>]   Harness MCP/rules + Orchesto pack + vault persona sync
-                          (Hem: run after git pull of this clone to update Orchesto)
+  inject [--target <t>] [--orchesto-only]
+                          Harness MCP/rules + Orchesto packs, or packs only
+  orchesto-update         git pull --ff-only this clone, then refresh Orchesto packs
+  orchesto-remove         Delete global Orchesto skill dirs (not vault notes)
   ingest                  (planned) promote external/ drops
   work-event              Append a day-log event (harness-agnostic capture)
   help
@@ -66,6 +81,10 @@ function parseArgs(argv: string[]): {
       target = rest[++i];
       continue;
     }
+    if (arg === "--orchesto-only") {
+      flags["orchesto-only"] = "true";
+      continue;
+    }
     if (arg?.startsWith("--path=")) path = arg.slice("--path=".length);
     if (arg?.startsWith("--vault=")) path = arg.slice("--vault=".length);
     if (arg?.startsWith("--target=")) target = arg.slice("--target=".length);
@@ -87,17 +106,58 @@ async function cmdInit(pathOverride?: string): Promise<void> {
   console.log(formatInitReport(await initVault(vault)));
 }
 
-async function cmdInject(targetRaw = "all"): Promise<void> {
+function parseTarget(targetRaw: string): InjectTarget | null {
   const allowed = new Set(["cursor", "claude", "codex", "zed", "all"]);
-  if (!allowed.has(targetRaw)) {
+  if (!allowed.has(targetRaw)) return null;
+  return targetRaw as InjectTarget;
+}
+
+function isOrchestoOnly(flags: Record<string, string>): boolean {
+  return flags["orchesto-only"] === "" || flags["orchesto-only"] === "true";
+}
+
+async function cmdInject(
+  targetRaw = "all",
+  flags: Record<string, string> = {},
+): Promise<void> {
+  const target = parseTarget(targetRaw);
+  if (!target) {
     console.error(`Unknown inject target: ${targetRaw}`);
     process.exitCode = 1;
     return;
   }
-  const { vaultPath, actions } = await injectHarnesses(
-    targetRaw as InjectTarget,
-  );
+  const { vaultPath, actions } = isOrchestoOnly(flags)
+    ? await injectOrchestoOnly(target)
+    : await injectHarnesses(target);
   console.log(formatInjectReport(vaultPath, actions));
+}
+
+async function cmdOrchestoUpdate(targetRaw = "all"): Promise<void> {
+  const target = parseTarget(targetRaw);
+  if (!target) {
+    console.error(`Unknown inject target: ${targetRaw}`);
+    process.exitCode = 1;
+    return;
+  }
+  try {
+    const { vaultPath, actions, pulled } = await updateOrchesto(target);
+    console.log(formatInjectReport(vaultPath, actions));
+    if (pulled) console.log(`[orchesto-update] pull: ${pulled}`);
+  } catch (err) {
+    console.error(err instanceof Error ? err.message : String(err));
+    process.exitCode = 1;
+  }
+}
+
+async function cmdOrchestoRemove(targetRaw = "all"): Promise<void> {
+  const target = parseTarget(targetRaw);
+  if (!target) {
+    console.error(`Unknown inject target: ${targetRaw}`);
+    process.exitCode = 1;
+    return;
+  }
+  const actions = await removeOrchestoSkills(target);
+  console.log(formatInjectReport("(orchesto-remove)", actions));
 }
 
 async function cmdWorkEvent(flags: Record<string, string>): Promise<void> {
@@ -134,7 +194,13 @@ async function main(): Promise<void> {
       await cmdInit(path);
       break;
     case "inject":
-      await cmdInject(target ?? "all");
+      await cmdInject(target ?? "all", flags);
+      break;
+    case "orchesto-update":
+      await cmdOrchestoUpdate(target ?? "all");
+      break;
+    case "orchesto-remove":
+      await cmdOrchestoRemove(target ?? "all");
       break;
     case "ingest":
       console.log("[ingest] not implemented yet");

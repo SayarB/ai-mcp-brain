@@ -48,7 +48,9 @@ Seat a persona per the skill: if MCP is readable, vault project then global over
 
 Repair / reinstall / ensure `.plans/` / **sync orchesto** / **update orchesto personas**: when the user asks, run `npm run brain -- inject` from the ai-mcp-brain checkout (or follow vault `workflows/global/setup-orchesto.md`). **Do not web-search.** Orchesto ≠ Orca/orca-cli. `git pull` of the clone does not update the Obsidian vault by itself.
 
-Global skill paths: `~/.cursor/skills/orchesto/`, `~/.agents/skills/orchesto/`, `~/.claude/skills/orchesto/` (as applicable).
+When the user asks to **update orchesto** / **sync orchesto**: follow skill `orchesto-update` (`npm run brain -- orchesto-update` from the ai-mcp-brain clone). When they ask to **remove orchesto** / **uninstall orchesto skill**: follow skill `orchesto-remove`.
+
+Global skill paths: `~/.cursor/skills/orchesto{,-update,-remove}/`, `~/.agents/skills/…`, `~/.claude/skills/…` (as applicable).
 
 ## Brainstormer (conversation persona)
 

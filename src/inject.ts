@@ -1,5 +1,5 @@
 import { chmod, mkdir } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { applyEdits, modify } from "jsonc-parser";
 import {
   configDir,
@@ -24,7 +24,7 @@ export type InjectTarget = "cursor" | "claude" | "codex" | "zed" | "all";
 export type InjectAction = {
   target: string;
   path: string;
-  action: "wrote" | "updated" | "skipped" | "merged";
+  action: "wrote" | "updated" | "skipped" | "merged" | "removed";
   detail?: string;
 };
 
@@ -315,27 +315,53 @@ async function mergeZedSettings(
   };
 }
 
-/** Global Orchesto skill directories (user-level harness adapters). */
-export function orchestoGlobalSkillDirs(target: InjectTarget = "all"): string[] {
-  const dirs: string[] = [];
+/** Global Orchesto skill pack names installed beside the delivery skill. */
+export const ORCHESTO_SKILL_NAMES = [
+  "orchesto",
+  "orchesto-update",
+  "orchesto-remove",
+] as const;
+
+function harnessSkillRoots(target: InjectTarget = "all"): string[] {
+  const roots: string[] = [];
   const doCursor = target === "all" || target === "cursor";
   const doClaude = target === "all" || target === "claude";
   const doAgents =
     target === "all" || target === "zed" || target === "codex";
 
-  if (doCursor) dirs.push(expandHome("~/.cursor/skills/orchesto"));
-  if (doAgents) dirs.push(expandHome("~/.agents/skills/orchesto"));
-  if (doClaude) dirs.push(expandHome("~/.claude/skills/orchesto"));
-  return dirs;
+  if (doCursor) roots.push(expandHome("~/.cursor/skills"));
+  if (doAgents) roots.push(expandHome("~/.agents/skills"));
+  if (doClaude) roots.push(expandHome("~/.claude/skills"));
+  return roots;
+}
+
+export type OrchestoInstallOpts = {
+  skillHome?: string;
+};
+
+/** Global Orchesto skill directories (user-level harness adapters). */
+export function orchestoGlobalSkillDirs(
+  target: InjectTarget = "all",
+  opts?: OrchestoInstallOpts,
+): string[] {
+  const roots = opts?.skillHome
+    ? [opts.skillHome]
+    : harnessSkillRoots(target);
+  return roots.flatMap((root) =>
+    ORCHESTO_SKILL_NAMES.map((name) => join(root, name)),
+  );
 }
 
 /** Global Orchesto SKILL.md paths (user-level harness adapters). */
-export function orchestoGlobalSkillPaths(target: InjectTarget = "all"): string[] {
-  return orchestoGlobalSkillDirs(target).map((dir) => join(dir, "SKILL.md"));
+export function orchestoGlobalSkillPaths(
+  target: InjectTarget = "all",
+  opts?: OrchestoInstallOpts,
+): string[] {
+  return orchestoGlobalSkillDirs(target, opts).map((dir) => join(dir, "SKILL.md"));
 }
 
-export function orchestoPackDir(): string {
-  return join(configDir(), "skills", "orchesto");
+export function orchestoPackDir(name = "orchesto"): string {
+  return join(configDir(), "skills", name);
 }
 
 export async function copyOrchestoPack(
@@ -372,13 +398,16 @@ export async function copyOrchestoPack(
   return actions;
 }
 
-/** Install Orchesto skill pack into global harness skill dirs (idempotent). */
+/** Install Orchesto skill packs into global harness skill dirs (idempotent). */
 export async function installOrchestoSkills(
   target: InjectTarget = "all",
+  opts?: OrchestoInstallOpts,
 ): Promise<InjectAction[]> {
-  const src = orchestoPackDir();
   const actions: InjectAction[] = [];
-  for (const destDir of orchestoGlobalSkillDirs(target)) {
+  for (const destDir of orchestoGlobalSkillDirs(target, opts)) {
+    const name = basename(destDir);
+    const src = orchestoPackDir(name);
+    if (!(await pathExists(src))) continue;
     actions.push(...(await copyOrchestoPack(src, destDir)));
   }
   return actions;

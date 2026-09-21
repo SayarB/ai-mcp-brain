@@ -27,6 +27,20 @@ Update after you **pull this clone**: `npm run brain -- inject`. `git pull` alon
 
 In chat: **sync orchesto** / **update orchesto personas** / **setup orchesto** → agent follows vault `workflows/global/setup-orchesto.md` (prefer inject from the clone).
 
+## Update
+
+1. Say **update orchesto** / **sync orchesto** (skill `orchesto-update`)
+2. Agent runs `npm run brain -- orchesto-update` from the **ai-mcp-brain clone** (not the product repo)
+3. Packs refresh; unmodified vault personas take upstream; local persona edits are skipped
+4. Reload the editor if the next skill load looks stale
+
+## Remove
+
+1. Say **remove orchesto** / **uninstall orchesto skill** (skill `orchesto-remove`)
+2. Agent runs `npm run brain -- orchesto-remove` from the clone
+3. Global `orchesto`, `orchesto-update`, and `orchesto-remove` dirs are deleted; vault personas and `.plans/` stay
+4. Reload the editor so they drop from the skills list
+
 ## Ship a feature
 
 1. Ask for the feature (skill may match without saying “run orchesto”)  
@@ -67,4 +81,4 @@ Brainstormer is never auto-offered.
 
 - [Orchesto feature](../features/orchesto.md)  
 - Vault: `workflows/global/setup-orchesto.md`  
-- Canonical pack: [`skills/orchesto/`](../../skills/orchesto/)  
+- Canonical pack: [`skills/orchesto/`](../../skills/orchesto/), plus `orchesto-update/` and `orchesto-remove/`

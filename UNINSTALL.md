@@ -87,11 +87,19 @@ Skip any harness the user does not use or whose paths do not exist.
 
 #### F. Orchesto global skill (optional — ask first)
 
-Hem Vault install also wrote the Orchesto skill globally. Only remove if I want Orchesto gone with the brain:
+Hem Vault install also wrote Orchesto skill packs globally. Prefer the dedicated command from the **ai-mcp-brain clone** (skills `orchesto-remove` / `remove orchesto`):
 
-- Delete `~/.cursor/skills/orchesto/` (or just `SKILL.md`) if present
-- Delete `~/.agents/skills/orchesto/` if present
-- Delete `~/.claude/skills/orchesto/` if present
+```bash
+npm run brain -- orchesto-remove
+```
+
+That deletes `orchesto/`, `orchesto-update/`, and `orchesto-remove/` under the global harness skill homes. It does **not** delete vault personas or `.plans/`.
+
+Manual fallback if the CLI is unavailable:
+
+- Delete `~/.cursor/skills/orchesto/`, `orchesto-update/`, `orchesto-remove/` if present
+- Delete `~/.agents/skills/orchesto/` (and the two siblings) if present
+- Delete `~/.claude/skills/orchesto/` (and the two siblings) if present
 
 Do **not** delete project-local `.agents/skills/orchesto` / `.cursor/skills/orchesto` in unrelated product repos unless I ask.
 
@@ -113,7 +121,7 @@ Only if I want a clean clone state:
 - No `ai-mcp-brain` entry in Cursor/Codex/Zed MCP configs.
 - No `second-brain.mdc` under `~/.cursor/rules/`.
 - Marked second-brain blocks gone from Claude/Codex/Zed agent files.
-- If I asked to remove Orchesto: global `*/skills/orchesto/` dirs gone.
+- If I asked to remove Orchesto: global `*/skills/orchesto/`, `orchesto-update/`, `orchesto-remove/` dirs gone.
 - `pgrep -f 'ai-mcp-brain/src/mcp/server.ts'` (or equivalent) returns nothing.
 - Tell me to restart/reload editors so they drop stale MCP clients.
 
@@ -136,7 +144,7 @@ Report: which harnesses were cleaned, whether the vault was kept or deleted, and
 | Codex MCP | `~/.codex/config.toml` → strip `# --- ai-mcp-brain MCP server ---` … end marker |
 | Zed MCP | `context_servers.ai-mcp-brain` in Zed `settings.json` |
 | Zed agents | Zed `AGENTS.md` → strip marked block |
-| Orchesto skill (optional) | `~/.cursor/skills/orchesto/`, `~/.agents/skills/orchesto/`, `~/.claude/skills/orchesto/` |
+| Orchesto skills (optional) | `~/.cursor/skills/orchesto{,-update,-remove}/`, `~/.agents/skills/…`, `~/.claude/skills/…` (`brain orchesto-remove`) |
 | Vault | keep by default |
 
 Re-install later: [`INSTALL.md`](INSTALL.md).

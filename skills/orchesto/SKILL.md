@@ -139,3 +139,5 @@ Short coordinator note: what shipped, whether brainstormer/CPO/PRD was used, whe
 - Read every file under `references/` up front
 - Seat a smallest-solution / lazy-code / ponytail persona, or an always-on lazy mode
 - Let implementor replace an approved plan with a smaller invention
+
+Lifecycle (update / remove the skill packs) lives in sibling skills `orchesto-update` and `orchesto-remove`, not this procedure.

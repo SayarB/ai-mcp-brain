@@ -86,7 +86,9 @@ See [Orchesto guide](../guides/orchesto.md) for setup, ship, brainstorm, and aud
 **Quick phrases**
 
 - Ship a feature end-to-end — skill matches; answer the PRD ask  
-- **sync orchesto** / **update orchesto personas** / **setup orchesto** — inject pack + vault persona sync  
+- **update orchesto** / **sync orchesto** — pull the brain clone and refresh Orchesto skill packs (`orchesto-update`)  
+- **remove orchesto** / **uninstall orchesto skill** — drop Orchesto from the skills list  
+- **setup orchesto** — optional repair / ensure `.plans/` / project-local skill copy
 - **brainstorm** / seat **brainstormer** — conversation seat (never auto)  
 - **audit** — standalone auditor  
 
@@ -108,4 +110,4 @@ See [Orchesto guide](../guides/orchesto.md) for setup, ship, brainstorm, and aud
 - [Orchesto guide](../guides/orchesto.md)  
 - [Guidance system](guidance.md)  
 - Vault: `workflows/global/setup-orchesto.md`, `persona-*.md`  
-- Canonical pack: [`skills/orchesto/`](../../skills/orchesto/)  
+- Canonical pack: [`skills/orchesto/`](../../skills/orchesto/), plus `orchesto-update/` and `orchesto-remove/`

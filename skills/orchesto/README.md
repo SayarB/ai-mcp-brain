@@ -31,9 +31,11 @@ npm run brain -- inject
 
 That copies this pack to global skill dirs **and** safe-syncs the five global vault personas (`workflows/global/persona-*.md`). Unmodified notes take upstream; local edits are skipped. Project overlays (`projects/<slug>/workflows/`) are never overwritten.
 
+Sibling skills `orchesto-update` and `orchesto-remove` install beside this pack (`brain orchesto-update` / `brain orchesto-remove`, or in chat **update orchesto** / **remove orchesto**).
+
 After `git push` of this repo, with `git config core.hooksPath .githooks`, `scripts/restart-mcp.sh` runs inject (fail-open) then restarts MCP.
 
-In chat: **sync orchesto** / **update orchesto personas** / **setup orchesto** → same inject.
+In chat: **update orchesto** / **sync orchesto** → `orchesto-update`. **remove orchesto** → `orchesto-remove`. Repair: **setup orchesto** / `inject --orchesto-only`.
 
 ## Layout
 
