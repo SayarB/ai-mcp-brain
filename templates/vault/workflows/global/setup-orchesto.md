@@ -3,71 +3,69 @@ type: workflow
 id: setup-orchesto
 scope: global
 tags: [orchesto, setup]
-updated: 2026-08-12
+updated: 2026-09-21
 ---
 
 # Setup orchesto
 
 **Orchesto ≠ Orca / orca-cli.** Do not web-search. Follow this note only.
 
-Hem Vault **INSTALL** / `bun run setup` already installs Orchesto **out of the box** (global skill + vault personas). Day-to-day: ship features — no separate setup prompt required.
+Hem Vault **INSTALL** / `bun run setup` already installs Orchesto **out of the box** (global skill packs + vault persona safe-sync). Day-to-day: ship features — no separate setup prompt required.
 
 Use this playbook when the user asks to **setup orchesto** to **repair**, **reinstall**, ensure `.plans/` in the current repo, or optionally add a **project-local** skill copy.
 
-## 1. Vault + MCP
+**Update Orchesto** (pull the brain clone + refresh packs): match skill `orchesto-update` (`npm run brain -- orchesto-update`). Do not use this repair playbook for that.
 
-- Call `vault_info` — expect `readable: true`.
-- Personas and this playbook live in the vault.
-- Default skill home = **global** user dirs (installed with the brain). Project-local copies are optional overlays for per-repo DAG edits.
+**Remove Orchesto** from the skills list: match skill `orchesto-remove` (or `npm run brain -- orchesto-remove` from the clone).
 
-## 2. Ensure personas (idempotent)
+## 1. Prefer inject from the clone
 
-These vault notes must exist (create from brain templates only if **missing** — never overwrite existing):
+From the **ai-mcp-brain checkout**:
 
-- `workflows/global/persona-cpo.md`
-- `workflows/global/persona-architect.md`
-- `workflows/global/persona-implementor.md`
-- `workflows/global/persona-reviewer.md`
-- `workflows/global/persona-brainstormer.md`
+```bash
+npm run brain -- inject --orchesto-only
+# or: bun run brain -- inject --orchesto-only
+```
 
-If missing: copy from the ai-mcp-brain checkout that runs this MCP (`templates/vault/workflows/global/persona-*.md`). Discover that checkout via the MCP server working directory if needed. Prefer `read_note` on the paths above once present.
+That copies `skills/orchesto/`, `orchesto-update/`, and `orchesto-remove/` to global harness skill dirs **and** safe-syncs `workflows/global/persona-{brainstormer,cpo,architect,implementor,reviewer}.md` from `skills/orchesto/references/`. Unmodified notes take upstream; local edits are skipped and reported. Project overlays (`projects/<slug>/workflows/`) are never overwritten. It does **not** rewrite harness MCP/config.
 
-## 3. Install / repair skill (harness adapter)
+`git pull` of the clone does **not** update the Obsidian vault by itself — use `orchesto-update` (pull + packs) or `inject --orchesto-only` (packs only).
 
-1. Read the skill body from vault note `workflows/global/orchesto-skill-template.md` (or from ai-mcp-brain `templates/skills/orchesto/SKILL.md` if that note is missing).
-2. **Default (matches INSTALL):** write the same `SKILL.md` body to matching **global** paths:
+If MCP `vault_info` is available, expect `readable: true`. Vault/MCP is **not** required for the skill pack itself.
 
-| Harness | Global skill path |
-|---------|-------------------|
-| **Cursor** | `~/.cursor/skills/orchesto/SKILL.md` |
-| **Zed** / **Codex** / **OpenCode** | `~/.agents/skills/orchesto/SKILL.md` |
-| **Claude Code** | `~/.claude/skills/orchesto/SKILL.md` |
+## 2. Manual pack copy (only if inject is unavailable)
 
-3. Prefer `bun run brain -- inject` / `npm run brain -- inject` from the ai-mcp-brain checkout when available (installs Orchesto with harness inject).
-4. **Optional project-local** (only if the user asks for a per-repo skill / Conductor workspace copy):
+Copy `<clone>/skills/orchesto/`, `orchesto-update/`, and `orchesto-remove/` (directories, not a single `SKILL.md`) to matching **global** paths:
+
+| Harness | Global skill directories |
+|---------|--------------------------|
+| **Cursor** | `~/.cursor/skills/orchesto/` (and `orchesto-update/`, `orchesto-remove/`) |
+| **Zed** / **Codex** / **OpenCode** | `~/.agents/skills/` same three names |
+| **Claude Code** | `~/.claude/skills/` same three names |
+
+Do **not** reconstruct SKILL.md from this vault’s `orchesto-skill-template.md` note (that note is a pointer only).
+
+**Optional project-local** (only if the user asks) — delivery skill unless they also asked for lifecycle copies:
 
 | Harness | Project skill path |
 |---------|-------------------|
-| **Zed** / **Codex** / **OpenCode** | `<repo>/.agents/skills/orchesto/SKILL.md` |
-| **Cursor** | `<repo>/.cursor/skills/orchesto/SKILL.md` |
-| **Claude Code** | `<repo>/.claude/skills/orchesto/SKILL.md` |
+| **Zed** / **Codex** / **OpenCode** | `<repo>/.agents/skills/orchesto/` |
+| **Cursor** | `<repo>/.cursor/skills/orchesto/` |
+| **Claude Code** | `<repo>/.claude/skills/orchesto/` |
 
-5. If a target file already exists and differs, **ask** before overwrite (except when re-running brain inject / fresh INSTALL).
-6. **Conductor:** no proprietary skill path — install the global paths (and project-local copies if they asked for Conductor workspaces).
-
-## 4. Plans folder
+## 3. Plans folder
 
 - Ensure `<this-git-repo>/.plans/` exists.
 
-## 5. Report
+## 4. Report
 
 Tell the user:
 
-- Skill path(s) installed (global by default; project-local only if requested)
-- Personas: `workflows/global/persona-*.md` (per-repo overlays: `projects/<slug>/workflows/persona-*.md`)
+- Skill path(s) installed (global by default; project-local only if requested) — delivery + update + remove
+- Vault personas safe-synced: `workflows/global/persona-*.md` (customize per repo under `projects/<slug>/workflows/persona-*.md`)
 - Runtime: Orchesto **always asks** whether a PRD/CPO pass is needed before architect; CPO is optional
-- Optional: user may seat **brainstormer** (`persona-brainstormer`) for grill + ideation before CPO/architect — not auto-run
-- Reminder: Orchesto already ships with Hem Vault install — this playbook is repair / extras
+- Optional: user may seat **brainstormer** before CPO/architect — not auto-run
+- Reminder: Orchesto already ships with Hem Vault install — this playbook is repair / extras. **update orchesto** / **remove orchesto** are sibling skills.
 
 ## Day-to-day (after install)
 
@@ -75,4 +73,4 @@ The skill runs optional CPO (PRD) → architect → plan + validations → imple
 
 Optional pre-step: user asks to **brainstorm** / seat **brainstormer** — conversation until they proceed, then the normal pipeline (PRD ask → …).
 
-Standalone `resolve_action` (e.g. `pr-review`) still works without this skill or any persona.
+Standalone `resolve_action` (e.g. `pr-review`) still works without this skill or any persona. If MCP is missing, skip `resolve_action` and continue.

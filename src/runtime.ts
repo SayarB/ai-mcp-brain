@@ -6,6 +6,7 @@ import { accessSync, constants as fsConstants } from "node:fs";
 import {
   access,
   copyFile,
+  cp,
   mkdir,
   readFile,
   writeFile,
@@ -83,6 +84,11 @@ export async function writeText(
 export async function copyFileEnsured(src: string, dest: string): Promise<void> {
   await mkdir(dirname(dest), { recursive: true });
   await copyFile(src, dest);
+}
+
+export async function copyDirEnsured(src: string, dest: string): Promise<void> {
+  await mkdir(dest, { recursive: true });
+  await cp(src, dest, { recursive: true });
 }
 
 export async function globFiles(

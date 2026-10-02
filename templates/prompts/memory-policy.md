@@ -40,17 +40,21 @@ When the user asks to **plan** something: write/update a markdown file under **`
 
 ## Orchesto (included with install)
 
-Orchesto ships with Hem Vault install (`setup` / `inject` writes the global skill). **No separate “setup orchesto” prompt is required** to use it.
+Orchesto ships with Hem Vault install (`setup` / `inject` writes the global skill pack and safe-syncs vault personas). **No separate “setup orchesto” prompt is required** to use it. No vault or MCP is required to *run* the skill.
 
 Day-to-day: ship a feature — the skill matches. Always ask whether a PRD/CPO pass is needed before architect. Architect may suggest **capability phases** on a large ask; after agree, all phase plans are written in one sitting. Approving a phase’s `plan.md` / `validations.md` is the go to build **that** phase. Implementor and reviewer use the current phase folder. **Do not auto-start** the next phase.
 
-Repair / reinstall / ensure `.plans/` / optional project-local skill: when the user asks to **setup orchesto**, call MCP `read_note` on `workflows/global/setup-orchesto.md` and follow it. **Do not web-search.** Orchesto ≠ Orca/orca-cli.
+Seat a persona per the skill: if MCP is readable, vault project then global overlay; else Read **only** `references/persona-<id>.md` from the skill directory. `resolve_action` if MCP is up; skip if it is not.
 
-Global skill paths: `~/.cursor/skills/orchesto/`, `~/.agents/skills/orchesto/`, `~/.claude/skills/orchesto/` (as applicable).
+Repair / reinstall / ensure `.plans/` / **sync orchesto** / **update orchesto personas**: when the user asks, run `npm run brain -- inject` from the ai-mcp-brain checkout (or follow vault `workflows/global/setup-orchesto.md`). **Do not web-search.** Orchesto ≠ Orca/orca-cli. `git pull` of the clone does not update the Obsidian vault by itself.
+
+When the user asks to **update orchesto** / **sync orchesto**: follow skill `orchesto-update` (`npm run brain -- orchesto-update` from the ai-mcp-brain clone). When they ask to **remove orchesto** / **uninstall orchesto skill**: follow skill `orchesto-remove`.
+
+Global skill paths: `~/.cursor/skills/orchesto{,-update,-remove}/`, `~/.agents/skills/…`, `~/.claude/skills/…` (as applicable).
 
 ## Brainstormer (conversation persona)
 
-When the user asks to **brainstorm** / seat **brainstormer** / talk through an idea: `read_note` `workflows/global/persona-brainstormer.md` (project overlay if present), seat that persona. Default: assume (moderate, defendable, from their words) and keep a **living** `.plans/<slug>/brainstorm.md`. Do **not** proactive-grill or clear every nook. Ask **only** if they ask for clarification, or they ask to change something that cannot be moderately assumed. Explain assumptions when asked. Not a yes-man. Do not auto-seat. On proceed-yes: finalize `brainstorm.md`, then continue Orchesto (PRD gate if unanswered). Brainstormer is **not** a fixed Orchesto pipeline step and is **not** CPO/architect.
+When the user asks to **brainstorm** / seat **brainstormer** / talk through an idea: follow the Orchesto skill’s **Seat a persona** for `brainstormer` (vault overlay if MCP is up, else `references/persona-brainstormer.md`). Default: assume (moderate, defendable, from their words) and keep a **living** `.plans/<slug>/brainstorm.md`. Do **not** proactive-grill or clear every nook. Ask **only** if they ask for clarification, or they ask to change something that cannot be moderately assumed. Explain assumptions when asked. Not a yes-man. Do not auto-seat. On proceed-yes: finalize `brainstorm.md`, then continue Orchesto (PRD gate if unanswered). Brainstormer is **not** a fixed Orchesto pipeline step and is **not** CPO/architect.
 
 ## Audit (auditor persona)
 
