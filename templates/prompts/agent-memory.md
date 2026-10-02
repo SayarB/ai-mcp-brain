@@ -139,7 +139,7 @@ Before stating a preference, prior decision, or “we always do X” as fact: se
 ## When you SHOULD write
 
 - **Soft suggestions** — user standing prefs/defaults (“prefer”, “try to”, “when making…”) → `upsert_guidance` `type: suggestion` **same turn**; no “remember this” required. Confirm briefly after logging. To fix a bad update: `mode: replace_section` or `remove_section` with `section` set to that heading. Use `mode: replace` only when rewriting the whole note.
-- **Plans** — when the user asks to plan: write/update `.plans/<slug>.md` at the git repo root and ensure `.plans/` is in `.gitignore` (every repo).
+- **Plans** — when the user asks to plan: write/update `.plans/<slug>.md` at the git repo root (every repo).
 - **Audits** — when seating auditor: write `.audits/<scope-slug>/report.md` and ensure `.audits/` is in `.gitignore`.
 - **Decisions** — chosen approach and why (project vs global per routing above)
 - **Gotchas** — bugs and quirks worth the next session

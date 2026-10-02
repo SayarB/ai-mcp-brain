@@ -58,7 +58,6 @@ If missing: copy from the ai-mcp-brain checkout that runs this MCP (`templates/v
 ## 4. Plans folder
 
 - Ensure `<this-git-repo>/.plans/` exists.
-- Ensure `.plans/` is listed in `<this-git-repo>/.gitignore`.
 
 ## 5. Report
 

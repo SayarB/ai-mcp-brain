@@ -93,7 +93,7 @@ Next:
   3. Restart Cursor / Claude / Codex / Zed so MCP + Orchesto skill reload
   4. Call MCP tool vault_info — expect readable: true
   5. Soft prefs auto-log to suggestions/; binding rules go in instructions/ only when you mean hard process
-  6. Orchesto is installed globally (no separate "setup orchesto" needed) — ship features; ensure .plans/ is gitignored in product repos
+  6. Orchesto is installed globally (no separate "setup orchesto" needed) — ship features
   7. In this repo: git config core.hooksPath .githooks  (post-push restarts local MCP)
 `);
 }

@@ -20,7 +20,7 @@ Procedure only. Persona bodies and action process live in the second-brain vault
 
 ## Artifacts
 
-All under `.plans/<feature-slug>/` (create slug from the feature; ensure `.plans/` is in `.gitignore`):
+All under `.plans/<feature-slug>/` (create slug from the feature):
 
 **Always (when those seats ran):**
 

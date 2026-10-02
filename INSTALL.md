@@ -320,7 +320,7 @@ Orchesto ships with Hem Vault. **Do this during install** — do not tell the us
 
 3. Create parent dirs as needed. If a target file already exists and differs, prefer updating to the template on a fresh install; on re-inject, overwrite only if content differs (idempotent skip when identical).
 4. Personas are already in the vault from step 6 (`workflows/global/persona-*.md`). Do not web-search; Orchesto ≠ Orca.
-5. Product repos still need `.plans/` (gitignored) when shipping a feature — the skill creates that on first use. Optional repair playbook: vault `workflows/global/setup-orchesto.md`.
+5. Product repos still need `.plans/` when shipping a feature — the skill creates that on first use. Optional repair playbook: vault `workflows/global/setup-orchesto.md`.
 
 #### 10. Open vault in Obsidian
 
@@ -382,7 +382,7 @@ Orchesto is installed **during** Hem Vault setup (global skill + vault personas)
 | Personas + playbook | Vault `workflows/global/persona-*.md`, `setup-orchesto.md` |
 | Contributor template | [`templates/skills/orchesto/`](templates/skills/orchesto/) (kept in sync with vault `orchesto-skill-template.md`) |
 
-Optional: say **setup orchesto** in a product repo to repair the global skill, ensure personas, ensure `.plans/` is gitignored, or install an optional **project-local** skill copy for per-repo DAG edits. Agent follows `workflows/global/setup-orchesto.md`.
+Optional: say **setup orchesto** in a product repo to repair the global skill, ensure personas, ensure `.plans/` exists, or install an optional **project-local** skill copy for per-repo DAG edits. Agent follows `workflows/global/setup-orchesto.md`.
 
 ---
 

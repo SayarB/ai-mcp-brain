@@ -51,7 +51,7 @@ Personas are workflows under `workflows/global/` (project overlays win). They ar
 
 **Hard stops:** brainstormer proceed-yes; CPO PRD approval (if opted in); architect plan/validation approval **per phase** (unphased: once); after a phase review `pass` when more phases remain.
 
-**Artifacts** under `.plans/<feature-slug>/` (gitignored):
+**Artifacts** under `.plans/<feature-slug>/`:
 
 | File | Author | When |
 |------|--------|------|
