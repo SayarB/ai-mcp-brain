@@ -18,7 +18,7 @@ Optional Orchesto seat: only run when the user says this feature needs a PRD / C
 
 1. Confirm problem, users, and success criteria. **Question budget:** at most **3 blocking** clarifying questions; then proceed with **labeled assumptions**.
 2. Skim product/context only as needed (existing UX, APIs, constraints) — do not deep-dive implementation design.
-3. Write `.plans/<feature-slug>/prd.md` (create folder; ensure `.plans/` is gitignored). Keep it sized to the ask — short for focused features, fuller for larger ones.
+3. Write `.plans/<feature-slug>/prd.md` (create folder). Keep it sized to the ask — short for focused features, fuller for larger ones.
 4. Reply with the **approval packet** (see Output).
 5. **Stop.** Do not start architect until the user explicitly approves the PRD. On reject: revise `prd.md`, send a new approval packet, wait again (or stop if the user aborts).
 

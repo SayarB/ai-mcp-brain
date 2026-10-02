@@ -319,7 +319,7 @@ Orchesto ships with Hem Vault. **Do this during install** — do not tell the us
 
 2. Create parent dirs as needed. If a target file already exists and differs, prefer updating to the pack on a fresh install; on re-inject, overwrite pack files that differ (idempotent skip when identical).
 3. Safe-sync vault `workflows/global/persona-{brainstormer,cpo,architect,implementor,reviewer}.md` from `skills/orchesto/references/` (unmodified take upstream; local edits skipped). Do not web-search; Orchesto ≠ Orca.
-4. Product repos still need `.plans/` (gitignored) when shipping a feature — the skill creates that on first use. **update orchesto** → `brain orchesto-update`. **remove orchesto** → `brain orchesto-remove`. Repair: `inject --orchesto-only` or vault `workflows/global/setup-orchesto.md`.
+4. Product repos still need `.plans/` when shipping a feature — the skill creates that on first use. **update orchesto** → `brain orchesto-update`. **remove orchesto** → `brain orchesto-remove`. Repair: `inject --orchesto-only` or vault `workflows/global/setup-orchesto.md`.
 
 Skill-only testers (no vault): `npx skills add SayarB/ai-mcp-brain --skill orchesto -g` and later `npx skills update orchesto -g`.
 

@@ -35,7 +35,7 @@ When seating `<id>` (`brainstormer` | `cpo` | `architect` | `implementor` | `rev
 
 ## Artifacts
 
-All under `.plans/<feature-slug>/` (create slug from the feature; ensure `.plans/` is in `.gitignore`):
+All under `.plans/<feature-slug>/` (create slug from the feature):
 
 **Always (when those seats ran):**
 

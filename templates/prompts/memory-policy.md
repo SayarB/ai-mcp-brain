@@ -36,7 +36,7 @@ To **fix** wrongly placed or incorrect guidance: prefer `upsert_guidance` with `
 
 ## Plans (every git repo)
 
-When the user asks to **plan** something: write/update a markdown file under **`.plans/`** at the repo root, and ensure **`.plans/`** is in that repo’s **`.gitignore`**. Do not rely on chat-only or `~/.cursor/plans` as the sole copy.
+When the user asks to **plan** something: write/update a markdown file under **`.plans/`** at the repo root. Do not rely on chat-only or `~/.cursor/plans` as the sole copy.
 
 ## Orchesto (included with install)
 

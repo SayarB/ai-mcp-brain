@@ -74,7 +74,7 @@ Facts are yours (codebase, lookup). Never quiz them on anything you can find. Ne
 
 Keep a **single living document** for the whole brainstorm — not only at proceed-yes.
 
-- Path: `.plans/<feature-slug>/brainstorm.md` (ensure `.plans/` exists and is gitignored).
+- Path: `.plans/<feature-slug>/brainstorm.md` (create `.plans/` if missing).
 - Create it early (first substantial turn). **Update it every time** something settles, an assumption is added/changed, or architecture shape shifts.
 - It is the accumulating handoff: problem, parts, what ships, assumptions (with why), architecture, ideas, overrides.
 - Tell them when you update it (path + what changed), briefly.

@@ -56,7 +56,6 @@ Do **not** reconstruct SKILL.md from this vault’s `orchesto-skill-template.md`
 ## 3. Plans folder
 
 - Ensure `<this-git-repo>/.plans/` exists.
-- Ensure `.plans/` is listed in `<this-git-repo>/.gitignore`.
 
 ## 4. Report
 
