@@ -29,7 +29,7 @@ npm run brain -- orchesto-remove
 
 Optional: `--target cursor|claude|codex|zed|all` (default `all`).
 
-3. Report which directories were removed. Tell the user to reload the editor so the skills list drops them.
+3. Report which directories were removed. Tell the user to reload the editor so the skills list drops them. Dirs reported `managed elsewhere (link -> …)` were left in place: remove those with the tool that manages them.
 
 ## Project-local copies
 

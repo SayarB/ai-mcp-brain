@@ -8,6 +8,7 @@ import { promisify } from "node:util";
 import { configDir, loadConfig, resolveVaultPath } from "./config.ts";
 import {
   installOrchestoSkills,
+  linkedSkillDirTarget,
   orchestoGlobalSkillDirs,
   orchestoPackDir,
   type InjectAction,
@@ -75,13 +76,23 @@ export async function updateOrchesto(
   return { vaultPath, actions, pulled };
 }
 
-/** Delete global Orchesto skill dirs only. Never vault or project-local copies. */
+/** Delete global Orchesto skill dirs only. Never vault, project-local, or symlinked (managed elsewhere) copies. */
 export async function removeOrchestoSkills(
   target: InjectTarget = "all",
   opts?: OrchestoInstallOpts,
 ): Promise<InjectAction[]> {
   const actions: InjectAction[] = [];
   for (const dir of orchestoGlobalSkillDirs(target, opts)) {
+    const linkTarget = await linkedSkillDirTarget(dir);
+    if (linkTarget) {
+      actions.push({
+        target: "orchesto-skill",
+        path: dir,
+        action: "skipped",
+        detail: `managed elsewhere (link -> ${linkTarget})`,
+      });
+      continue;
+    }
     const existed = await pathExists(dir);
     await rm(dir, { recursive: true, force: true });
     actions.push({
