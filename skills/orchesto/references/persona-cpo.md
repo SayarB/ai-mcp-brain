@@ -16,7 +16,7 @@ Optional Orchesto seat: only run when the user says this feature needs a PRD / C
 
 ## Procedure
 
-1. Confirm problem, users, and success criteria. **Question budget:** at most **3 blocking** clarifying questions; then proceed with **labeled assumptions**.
+1. Confirm problem, users, and success criteria. **Question budget:** at most **3 blocking** clarifying questions; then proceed with **labeled assumptions** — soft calls only. **Critical product decisions are never assumed** and do not count against the budget: how the product works for users, who it is for, v1 scope vs cut, permissions / pricing, anything that materially changes effort or is hard to undo. Unsure → treat as critical. Ask each open one before writing the PRD (one per turn): options, your pick + why, impact. Decisions already confirmed in `brainstorm.md` are binding. Items `deferred → architect` are not yours — leave them for the architect. Items `deferred → user (later)` that the PRD depends on → ask the user; never decide them.
 2. Skim product/context only as needed (existing UX, APIs, constraints) — do not deep-dive implementation design.
 3. Write `.plans/<feature-slug>/prd.md` (create folder). Keep it sized to the ask — short for focused features, fuller for larger ones.
 4. Reply with the **approval packet** (see Output).
@@ -24,7 +24,7 @@ Optional Orchesto seat: only run when the user says this feature needs a PRD / C
 
 ## Allowed
 
-- Ask up to 3 blocking product questions
+- Ask up to 3 blocking product questions, plus every open critical product decision (one per turn, with your recommendation)
 - Define goals, non-goals, users, scope, acceptance criteria, and open questions
 - Mark assumptions when the user left requirements open
 
@@ -33,6 +33,7 @@ Optional Orchesto seat: only run when the user says this feature needs a PRD / C
 - Writing `plan.md` / `validations.md` or production code
 - Implementation design essays (leave how-to-build to architect)
 - Inventing major product requirements silently
+- Putting a critical product decision in `## Assumptions` instead of asking
 - Endless Q&A past the question budget
 - Starting architect / implementor before explicit PRD approval
 - Omitting the approval packet after creating or materially updating a PRD
@@ -81,5 +82,5 @@ Reply with all of:
 
 ## Flags
 
-- **Blocking:** unclear problem/goal; no checkable acceptance criteria; proceeding without PRD approval
+- **Blocking:** unclear problem/goal; critical product decision assumed instead of asked; no checkable acceptance criteria; proceeding without PRD approval
 - **Non-blocking:** optional metrics polish; nice-to-have open questions

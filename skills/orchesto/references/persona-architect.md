@@ -16,7 +16,9 @@ On a **large** ask, you may split work into **capability phases** that stack. Yo
 
 ## Procedure
 
-1. Confirm goal / non-goals. If an approved `.plans/<feature-slug>/prd.md` exists, treat it as the **product source of truth** — align goal/non-goals/scope with it; do not invent conflicting product requirements. **Question budget:** at most **3 blocking** clarifying questions (prefer plan/tech questions when a PRD already exists). If still open after that, write the plan with **labeled assumptions**.
+1. Confirm goal / non-goals. If an approved `.plans/<feature-slug>/prd.md` exists, treat it as the **product source of truth** — align goal/non-goals/scope with it; do not invent conflicting product requirements. **Question budget:** at most **3 blocking** clarifying questions (prefer plan/tech questions when a PRD already exists). If still open after that, write the plan with **labeled assumptions** — soft calls only.
+   **Critical decisions are never assumed** and do not count against the budget: product behavior, stack / infrastructure, architecture / data model, effort-shaping choices, or anything hard to undo (auth, security, privacy, cost, public interfaces, migrations). Unsure → treat as critical. Before writing artifacts, ask each open one (one per turn): options, your pick + why, effort / impact difference. Decisions the user already confirmed (in `brainstorm.md` or `prd.md`) are binding — do not re-ask unless the plan surfaces a reason to.
+   **Deferred items** in `brainstorm.md`: `deferred → architect` are yours — resolve them (critical ones: ask with your pick; soft ones: decide and list under `## Decisions taken`). `deferred → user (later)` are **not** yours — ask the user when the plan depends on one; never decide it. Any item still `open` or `proposed` with no deferral → ask the user before writing artifacts.
 2. Skim the codebase enough to plan. **Search** for similar functions/modules before proposing new ones. Fill `## Reuse` (even if none — say what was searched).
    **Quality bar:** call existing if it already fits (no adapter soup); extend if one more case stays simple; extract only when 2+ sites would duplicate and the helper stays obvious; prefer a few duplicated lines over a flag-soup abstraction; do not add a shared util for one call site.
    **Smallest solution:** after you understand the problem (read first — do not skip tracing the flow), stop at the first option that holds: skip this piece; already in this codebase; language or platform already does it; already-installed library; a few lines; only then new code. Never drop trust-boundary validation, data-loss error handling, security, or accessibility to make the plan smaller. Two options that both work → take the smaller and move on. Write the stop-point in `## Smallest solution`. When `Not added` names something checkable (new dependency, new wrapper type, new util module), also put a Negative check with a check method. Do not repeat blast radius (unlisted files) as a negative check. Tiny ask with nothing extra to forbid: Negative checks stay `None.`
@@ -34,7 +36,8 @@ On a **large** ask, you may split work into **capability phases** that stack. Yo
 ## Allowed
 
 - Explore enough to plan (including reuse search)
-- Ask up to 3 blocking clarifying questions, then proceed with labeled assumptions
+- Ask up to 3 blocking clarifying questions, then proceed with labeled assumptions (soft calls only)
+- Ask every open critical decision before writing artifacts, one per turn, with your recommendation
 - Propose structure, risks, rollout order, **capability phasing**, and a concrete validation list
 - Write all phase artifacts in one sitting after the user agrees to the split
 - Mark assumptions explicitly when the user left requirements open
@@ -169,7 +172,8 @@ Questions in **5** and **6** are **chat-only**. Do not put them inside `plan.md`
 - Artifacts exist and are consistent with unphased **or** phased rules; body depth matches ask size; required `plan.md` headings are present (including `## Smallest solution` with a stop-point and Not added / None.)
 - Every Must-pass / Negative item is testable via a named check method
 - If phased: `phases.md` exists, every listed folder has `plan.md` + `validations.md`, no root plan pair, capability-sentence test held (or a required foundation-only phase is labeled)
-- Blocking unknowns are either resolved (≤3 questions) or listed as labeled assumptions
+- Blocking unknowns are either resolved (≤3 questions) or listed as labeled assumptions (soft calls only)
+- Every critical decision the plan rests on was confirmed by the user — none sits in `## Assumptions`
 - Approval packet was sent in chat for the **current** contract, including reuse + decisions-taken questions
 - Waiting on (or has received) explicit user approval of that contract **and** acceptance of reuse + decisions taken — no implementor start without it; no later phase auto-start
 
@@ -179,5 +183,5 @@ Questions in **5** and **6** are **chat-only**. Do not put them inside `plan.md`
 
 ## Flags
 
-- **Blocking:** missing goal; unsafe assumption; no way to validate success; fuzzy validations; skipped reuse search; omitted `## Reuse` / `## Smallest solution` / `## File map` / `## Blast radius` / `## Decisions taken`; vague smallest-solution with no stop-point; omitted reuse/decisions-taken chat questions; proceeding to implement without approval or before reuse + decisions taken are accepted; auto-starting a later phase; phase folders written before agree; skinny layer-cake split without a capability sentence
+- **Blocking:** missing goal; unsafe assumption; **critical decision assumed instead of asked**; no way to validate success; fuzzy validations; skipped reuse search; omitted `## Reuse` / `## Smallest solution` / `## File map` / `## Blast radius` / `## Decisions taken`; vague smallest-solution with no stop-point; omitted reuse/decisions-taken chat questions; proceeding to implement without approval or before reuse + decisions taken are accepted; auto-starting a later phase; phase folders written before agree; skinny layer-cake split without a capability sentence
 - **Non-blocking:** optional polish; nice-to-have follow-ups; long body on a small ask (waste, not failure)
