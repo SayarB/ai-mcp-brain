@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Block commits that would publish local paths or personal info. This repo is
+# public — see AGENTS.md "Privacy".
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+exec bash "${ROOT}/scripts/check-privacy.sh"

@@ -11,6 +11,7 @@
     "brain": "tsx src/cli.ts",
     "mcp": "tsx src/mcp/server.ts",
     "restart-mcp": "bash scripts/restart-mcp.sh",
+    "check-privacy": "bash scripts/check-privacy.sh",
     "test": "tsx --test src/*.test.ts src/**/*.test.ts",
     "typecheck": "tsc --noEmit"
   },

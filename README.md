@@ -55,13 +55,15 @@ Then: open vault in Obsidian → restart editors → MCP `vault_info` → `reada
 
 Inject prefers **Bun** for the MCP command when available; otherwise **Node + `tsx`**. Env: `BRAIN_VAULT` overrides vault path.
 
-After cloning this repo, enable git hooks once so **post-push injects Orchesto into the vault and restarts local MCP**:
+After cloning this repo, enable git hooks once so **pre-commit blocks personal info** and **post-push injects Orchesto into the vault and restarts local MCP**:
 
 ```bash
 git config core.hooksPath .githooks
 ```
 
 Or run manually anytime: `npm run restart-mcp` / `bash scripts/restart-mcp.sh`.
+
+**This repo is public.** Before contributing (person or agent), read [`AGENTS.md`](AGENTS.md): no local paths, folder layout, or personal info in any commit. `npm run check-privacy` checks staged changes; CI checks every PR commit.
 
 ## Vault layout
 
@@ -132,6 +134,7 @@ Injected slim copy: [`templates/prompts/memory-policy.md`](templates/prompts/mem
 ## Repo map
 
 ```
+AGENTS.md               # rules for contributors and agents (privacy)
 docs/                   # product documentation (source for site)
 site/                   # Hem Vault landing + docs (Astro)
 design-system/          # site visual system
