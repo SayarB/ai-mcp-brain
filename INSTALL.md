@@ -387,7 +387,7 @@ Orchesto is a **standalone Agent Skill**. Hem Vault install copies the pack and 
 | Skill-only install / update | `npx skills add SayarB/ai-mcp-brain --skill orchesto -g` then `npx skills update orchesto -g` |
 | Hem update | `brain orchesto-update` (ff-only pull + packs) or `git pull` then `inject --orchesto-only`. `git pull` of the clone does **not** update Obsidian by itself. |
 
-In chat: **update orchesto** / **sync orchesto** → `orchesto-update`. **remove orchesto** → `orchesto-remove`. Repair / **setup orchesto** → `inject --orchesto-only`. Agent follows `workflows/global/setup-orchesto.md`.
+Skill dirs that are symlinks (dotfiles, a fleet repo) are managed elsewhere: inject, update and remove skip them. In chat: **update orchesto** / **sync orchesto** → `orchesto-update`. **remove orchesto** → `orchesto-remove`. Repair / **setup orchesto** → `inject --orchesto-only`. Agent follows `workflows/global/setup-orchesto.md`.
 
 ---
 

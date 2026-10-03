@@ -34,7 +34,7 @@ npm run brain -- orchesto-update
 
 Optional: `--target cursor|claude|codex|zed|all` (default `all`).
 
-3. Report the CLI output (paths wrote / updated / skipped / failed). If git refused (dirty tree or non-fast-forward), report that and stop — do not stash or force.
+3. Report the CLI output (paths wrote / updated / skipped / failed). If git refused (dirty tree or non-fast-forward), report that and stop — do not stash or force. If a skill dir is reported `managed elsewhere (link -> …)`, another tool installs it on this machine: tell the user to update it there.
 4. Tell the user to **reload the editor** if the next skill load still looks stale.
 
 Repair without pulling: from the same clone, `npm run brain -- inject --orchesto-only`.

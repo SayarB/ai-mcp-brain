@@ -1,4 +1,4 @@
-import { chmod, mkdir } from "node:fs/promises";
+import { chmod, lstat, mkdir, readlink } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { applyEdits, modify } from "jsonc-parser";
 import {
@@ -398,6 +398,21 @@ export async function copyOrchestoPack(
   return actions;
 }
 
+/**
+ * If a harness skill dir is a symlink, another tool manages it (dotfiles,
+ * a fleet repo, stow…). Returns the link target so callers can skip it
+ * instead of writing through or deleting someone else's files.
+ */
+export async function linkedSkillDirTarget(dir: string): Promise<string | null> {
+  try {
+    const stat = await lstat(dir);
+    if (!stat.isSymbolicLink()) return null;
+    return await readlink(dir);
+  } catch {
+    return null;
+  }
+}
+
 /** Install Orchesto skill packs into global harness skill dirs (idempotent). */
 export async function installOrchestoSkills(
   target: InjectTarget = "all",
@@ -408,6 +423,16 @@ export async function installOrchestoSkills(
     const name = basename(destDir);
     const src = orchestoPackDir(name);
     if (!(await pathExists(src))) continue;
+    const linkTarget = await linkedSkillDirTarget(destDir);
+    if (linkTarget) {
+      actions.push({
+        target: "orchesto-skill",
+        path: destDir,
+        action: "skipped",
+        detail: `managed elsewhere (link -> ${linkTarget})`,
+      });
+      continue;
+    }
     actions.push(...(await copyOrchestoPack(src, destDir)));
   }
   return actions;
