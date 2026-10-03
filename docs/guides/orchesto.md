@@ -55,10 +55,12 @@ In chat: **sync orchesto** / **update orchesto personas** / **setup orchesto** â
 ## Brainstorm
 
 1. Say **brainstorm** / seat **brainstormer** / talk through an idea  
-2. Grill until the idea is clear (questions that improve it; you answer). On a **large app**, map parts and go deep on each (nooks, edges, seams) â€” not surface-only.  
-3. Then **ideate**: discussion with new ideas, products, and methods (on ask and unprompted) **per part** as well as whole.  
-4. On proceed-yes: `.plans/<slug>/brainstorm.md`, then Orchesto (PRD ask if unanswered)  
-5. On abort: stay in seat; no CPO/architect  
+2. It assumes sensible defaults for **soft** calls (labeled, with why) instead of grilling you. **Critical** decisions (how the product works, stack / infra, architecture / data, anything that changes effort a lot or is hard to undo) are never assumed: it asks you with its recommendation, so you can say yes or suggest something else. It won't proceed until every critical decision is confirmed, and CPO / architect follow the same rule.  
+   Before moving on, it checks for open questions and unconfirmed proposals. If any are left, it lists them and asks whether to start a question round. You can also defer items (*the architect can decide*, *I'll decide later*); deferred items are handed off with their owner. Without your explicit deferral, nothing open goes to the architect. On a **large app** it maps parts and goes deep on the ones you pick.  
+3. Say **ask me clarifying questions** (or *probe this*, *what's still open?*) for a **question round**: it lists every open question first, then asks **one at a time**. Discuss any question as long as you need; once it's locked, it moves to the next. Say *skip*, *assume it*, *jump to Qn*, or *stop* anytime.  
+4. Then **ideate**: discussion with new ideas, products, and methods (on ask and unprompted) **per part** as well as whole.  
+5. On proceed-yes: `.plans/<slug>/brainstorm.md`, then Orchesto (PRD ask if unanswered)  
+6. On abort: stay in seat; no CPO/architect  
 
 Brainstormer is never auto-offered.
 

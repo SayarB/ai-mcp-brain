@@ -71,7 +71,8 @@ If the user asks to **brainstorm** / seat **brainstormer** / talk through an ide
 
 1. Seat `brainstormer` (see **Seat a persona**) — **conversation** across turns; do not ticket-close
 2. Stay until the user proceeds or aborts (per persona)
-3. On proceed-yes → continue to **0. PRD gate** (if not already answered in-thread); on abort → stop
+3. Before proceed: brainstormer runs its **open-items check** — any question or critical proposal the user has not resolved or explicitly deferred (to the architect, or to themselves for later) is surfaced with an offer to start a question round. No handoff with open items
+4. On proceed-yes → continue to **0. PRD gate** (if not already answered in-thread); on abort → stop
 
 **Do not** always-ask for brainstormer. **Do not** auto-seat it.
 
@@ -131,6 +132,7 @@ Short coordinator note: what shipped, whether brainstormer/CPO/PRD was used, whe
 - Skip the PRD ask, or seat CPO without a user yes
 - Start architect before PRD approval when the user opted into CPO
 - Skip plan/validation approval, validations, or the review report
+- Let any seat settle a **critical decision** by assumption (product behavior, stack / infrastructure, architecture / data model, effort-shaping choices, or anything hard to undo (auth, security, privacy, cost, public interfaces, migrations)). Ask the user with a recommendation; question budgets do not cap these. Decisions confirmed in an earlier seat carry forward
 - Auto-start the next phase after review `pass`
 - Skip per-phase approval or per-phase review
 - Implement every phase then review once
