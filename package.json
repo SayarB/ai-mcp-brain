@@ -21,6 +21,7 @@
     "typescript": "^5.8.0"
   },
   "dependencies": {
+    "@huggingface/transformers": "^4.3.2",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "glob": "^13.0.6",
     "jsonc-parser": "^3.3.1",

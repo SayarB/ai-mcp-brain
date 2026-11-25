@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { loadConfig, resolveVaultPath } from "./config.ts";
+import { searchHybrid, syncVaultIndex, type SearchMode } from "./index/index.ts";
 import { formatInitReport, initVault } from "./init.ts";
 import {
   formatInjectReport,
@@ -20,6 +21,8 @@ type Command =
   | "setup"
   | "init"
   | "inject"
+  | "reindex"
+  | "search"
   | "ingest"
   | "work-event"
   | "orchesto-update"
@@ -43,6 +46,10 @@ Advanced:
                           Harness MCP/rules + Orchesto packs, or packs only
   orchesto-update         git pull --ff-only this clone, then refresh Orchesto packs
   orchesto-remove         Delete global Orchesto skill dirs (not vault notes)
+  reindex [--vault <dir>] [--force] [--no-embed]
+                          Sync or rebuild the local SQLite hybrid search index
+  search <query> [--project <slug>] [--mode hybrid|fts|vector] [--limit N]
+                          Run hybrid search from the terminal
   ingest                  (planned) promote external/ drops
   work-event              Append a day-log event (harness-agnostic capture)
   help
@@ -63,16 +70,18 @@ function parseArgs(argv: string[]): {
   command: Command;
   path?: string;
   target?: string;
+  positionals: string[];
   flags: Record<string, string>;
 } {
   const [commandRaw, ...rest] = argv;
   const command = (commandRaw ?? "help") as Command;
   let path: string | undefined;
   let target: string | undefined;
+  const positionals: string[] = [];
   const flags: Record<string, string> = {};
 
   for (let i = 0; i < rest.length; i++) {
-    const arg = rest[i];
+    const arg = rest[i]!;
     if (arg === "--path" || arg === "--vault") {
       path = rest[++i];
       continue;
@@ -81,23 +90,36 @@ function parseArgs(argv: string[]): {
       target = rest[++i];
       continue;
     }
-    if (arg === "--orchesto-only") {
-      flags["orchesto-only"] = "true";
+    if (arg === "--orchesto-only" || arg === "--force" || arg === "--no-embed") {
+      flags[arg.slice(2)] = "true";
       continue;
     }
-    if (arg?.startsWith("--path=")) path = arg.slice("--path=".length);
-    if (arg?.startsWith("--vault=")) path = arg.slice("--vault=".length);
-    if (arg?.startsWith("--target=")) target = arg.slice("--target=".length);
-    const eq = arg?.match(/^--([a-z-]+)=(.*)$/);
+    if (arg.startsWith("--path=")) {
+      path = arg.slice("--path=".length);
+      continue;
+    }
+    if (arg.startsWith("--vault=")) {
+      path = arg.slice("--vault=".length);
+      continue;
+    }
+    if (arg.startsWith("--target=")) {
+      target = arg.slice("--target=".length);
+      continue;
+    }
+    const eq = arg.match(/^--([a-z-]+)=(.*)$/);
     if (eq) {
       flags[eq[1]!] = eq[2]!;
       continue;
     }
-    if (arg?.startsWith("--") && rest[i + 1] && !rest[i + 1]!.startsWith("--")) {
+    if (arg.startsWith("--") && rest[i + 1] && !rest[i + 1]!.startsWith("--")) {
       flags[arg.slice(2)] = rest[++i]!;
+      continue;
+    }
+    if (!arg.startsWith("--")) {
+      positionals.push(arg);
     }
   }
-  return { command, path, target, flags };
+  return { command, path, target, positionals, flags };
 }
 
 async function cmdInit(pathOverride?: string): Promise<void> {
@@ -180,8 +202,74 @@ async function cmdWorkEvent(flags: Record<string, string>): Promise<void> {
   }
 }
 
+async function cmdReindex(
+  pathOverride: string | undefined,
+  flags: Record<string, string>,
+): Promise<void> {
+  const config = await loadConfig();
+  const vault = resolveVaultPath(config.vault_path, pathOverride);
+  const stats = await syncVaultIndex(vault, {
+    forceRebuild: flags.force === "true",
+    embedder: flags["no-embed"] === "true" ? null : undefined,
+  });
+  console.log(JSON.stringify(stats, null, 2));
+}
+
+async function cmdSearch(
+  positionals: string[],
+  pathOverride: string | undefined,
+  flags: Record<string, string>,
+): Promise<void> {
+  const query = positionals.join(" ").trim();
+  if (!query) {
+    console.error("Usage: brain search <query> [--project <slug>] [--mode hybrid|fts|vector]");
+    process.exitCode = 1;
+    return;
+  }
+  const config = await loadConfig();
+  const vault = resolveVaultPath(config.vault_path, pathOverride);
+  const modeRaw = flags.mode ?? (flags["no-embed"] === "true" ? "fts" : "hybrid");
+  if (modeRaw !== "hybrid" && modeRaw !== "fts" && modeRaw !== "vector") {
+    console.error(`Unknown search mode: ${modeRaw} (expected hybrid | fts | vector)`);
+    process.exitCode = 1;
+    return;
+  }
+  const scopeRaw = flags.scope;
+  if (scopeRaw && scopeRaw !== "global" && scopeRaw !== "project") {
+    console.error(`Unknown scope: ${scopeRaw} (expected global | project)`);
+    process.exitCode = 1;
+    return;
+  }
+  const mode = modeRaw as SearchMode;
+  const limit = flags.limit ? Number(flags.limit) : 10;
+  const result = await searchHybrid(vault, query, {
+    limit: Number.isFinite(limit) && limit > 0 ? limit : 10,
+    mode,
+    project: flags.project,
+    scope: scopeRaw as "global" | "project" | undefined,
+    type: flags.type,
+    updatedAfter: flags["updated-after"],
+    embedder: flags["no-embed"] === "true" ? null : undefined,
+  });
+  console.log(
+    `mode=${result.modeUsed} hits=${result.hits.length} searchMs=${result.searchMs}ms`,
+  );
+  for (let i = 0; i < result.hits.length; i++) {
+    const h = result.hits[i]!;
+    console.log(
+      `${i + 1}. ${h.path} (${h.heading}) [score=${h.score} via=${h.matchedBy.join("+")}${
+        h.vectorScore !== null ? ` sim=${h.vectorScore}` : ""
+      }]`,
+    );
+    console.log(`   ${h.snippet}`);
+    if (h.relatedLinks.length) {
+      console.log(`   links: ${h.relatedLinks.join(", ")}`);
+    }
+  }
+}
+
 async function main(): Promise<void> {
-  const { command, path, target, flags } = parseArgs(processArgs());
+  const { command, path, target, positionals, flags } = parseArgs(processArgs());
 
   switch (command) {
     case "setup":
@@ -195,6 +283,12 @@ async function main(): Promise<void> {
       break;
     case "inject":
       await cmdInject(target ?? "all", flags);
+      break;
+    case "reindex":
+      await cmdReindex(path, flags);
+      break;
+    case "search":
+      await cmdSearch(positionals, path, flags);
       break;
     case "orchesto-update":
       await cmdOrchestoUpdate(target ?? "all");
