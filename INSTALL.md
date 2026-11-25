@@ -241,7 +241,7 @@ If `setup` fails, do the manual path:
 
 1. Copy everything under `templates/vault/` into the vault root — create missing files/dirs only; **never overwrite** existing files.
 2. Ensure dirs exist (must match `REQUIRED_VAULT_DIRS` in `src/vault-layout.ts`):
-   `inbox`, `external`, `projects`, `patterns`, `stack`, `stack/catalog`, `media`, `agents`, `instructions`, `instructions/global`, `suggestions`, `suggestions/global`, `workflows`, `workflows/global`, `actions`, `_meta`, `work`, `work/cache`, `work/log`.
+   `inbox`, `external`, `projects`, `patterns`, `stack`, `stack/catalog`, `media`, `memories`, `agents`, `instructions`, `instructions/global`, `suggestions`, `suggestions/global`, `workflows`, `workflows/global`, `actions`, `_meta`, `work`, `work/cache`, `work/log`.
 3. Write repo `config.toml` (gitignored):
 
 ```toml

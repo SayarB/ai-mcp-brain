@@ -194,11 +194,7 @@ function matchAction(
 }
 
 function truncateNote(note: VaultNote): string {
-  const summary = noteToSummary(note, MAX_NOTE_CHARS);
-  if (note.body.length > MAX_NOTE_CHARS) {
-    return `${summary}\n\n…(truncated at ${MAX_NOTE_CHARS} chars)`;
-  }
-  return summary;
+  return noteToSummary(note, MAX_NOTE_CHARS);
 }
 
 export type ResolveActionInput = {

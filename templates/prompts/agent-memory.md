@@ -7,10 +7,16 @@ You have access to a durable second brain: an Obsidian markdown vault plus MCP t
 **MCP tools**
 | Tool | Use for |
 |------|---------|
-| `search_notes` | Find existing notes before writing or answering from memory |
-| `read_note` | Load a specific note by relative path |
-| `remember` | Create or append a durable note (`scope`: global or project) |
-| `get_project_context` | Load/ensure notes for a **git repo** slug |
+| `search_notes` | Hybrid semantic + FTS5 search across the entire vault (excludes superseded memories) |
+| `read_note` | Load a specific note by relative path (supports `section`, `tail`, `max_chars`) |
+| `remember` | Create or append a long-form note or project pack file (`scope`: global or project) |
+| `add_memory` | Store an atomic, ID-tracked memory with dedup + secret guard (`profile`, `preferences`, `decisions`, `facts`, `gotchas`) |
+| `search_memory` | Hybrid search over atomic memories (`status=active` default; `all` for supersede history) |
+| `list_memories` | List atomic memories by scope/project/category/app/status |
+| `update_memory` | Surgically edit an atomic memory by ID |
+| `supersede_memory` | Replace an outdated atomic memory while preserving temporal lineage |
+| `delete_memory` | Permanently delete an atomic memory by ID |
+| `get_project_context` | Load/ensure notes + active atomic memories for a **git repo** slug |
 | `list_recent` | Skim recently used/learned tools and skills |
 | `track_tool` | Upsert a tool/SaaS catalog note and prepend the recent log |
 | `resolve_guidance` | Look up instructions / soft suggestions / workflows before inventing process |
@@ -107,6 +113,20 @@ Orchesto is a standalone skill pack (`skills/orchesto/`: DAG in `SKILL.md`, seat
 ### Auditor (standalone persona)
 
 `persona-auditor` is **not** part of Orchesto. When the user asks to audit a repo/area: `read_note` `workflows/global/persona-auditor.md` (project overlay if present), seat it, write `.audits/<scope-slug>/report.md`, and ensure `.audits/` is gitignored. Reviewer = change/PR cleanliness; auditor = holistic vulnerabilities/bugs/issues in scope.
+
+---
+
+## Which write tool to use (routing)
+
+| What you are saving | Tool | Where it goes |
+|---------------------|------|---------------|
+| Standing **process** pref (“prefer…”, “lean…”) for coding/PR/commit/git | `upsert_guidance` (`type: suggestion`) | `suggestions/` (loaded by `resolve_action`) |
+| Explicit **hard rule** (“must…”, “never skip…”) | `upsert_guidance` (`type: instruction`) | `instructions/` (loaded by `resolve_action`) |
+| **Atomic, evolvable fact** (personal profile, cross-harness preference, single decision/gotcha that may later be superseded) | `add_memory` / `supersede_memory` | `memories/<category>.md` or `projects/<slug>/memories.md` |
+| **Long-form / narrative doc** (architecture overview, inbox drop, multi-section pattern, project README/decisions/gotchas prose) | `remember` | `projects/<slug>/`, `patterns/`, `inbox/`, … |
+| **Tool or SaaS** sighting/learning | `track_tool` | `stack/catalog/` + `stack/recent.md` |
+
+Do not write the same fact with both `add_memory` and `remember` (or `upsert_guidance`).
 
 ---
 

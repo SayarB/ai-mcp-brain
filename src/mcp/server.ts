@@ -18,10 +18,22 @@ import {
   type SearchMode,
 } from "../index/index.ts";
 import {
+  addMemorySmart,
+  deleteMemory,
+  listMemories,
+  MEMORY_CATEGORIES,
+  searchMemories,
+  supersedeMemory,
+  updateMemory,
+  type MemoryCategory,
+} from "../memory/index.ts";
+import {
+  findMarkdownSection,
   getProjectContext,
   listGuidance,
   listRecent,
   noteToSummary,
+  noteToTailSummary,
   readNote,
   rememberNote,
   resolveGuidance,
@@ -195,16 +207,41 @@ export function createBrainServer(): McpServer {
     {
       title: "Read note",
       description:
-        "Read a vault note by relative path (e.g. projects/my-repo/decisions.md).",
+        "Read a vault note by relative path (e.g. projects/my-repo/decisions.md). Returns up to 16,000 chars by default; pass section to jump to a heading or tail=true for newest appended entries.",
       inputSchema: {
         path: z.string().min(1).describe("Relative path inside the vault"),
+        section: z
+          .string()
+          .optional()
+          .describe("Optional heading text to extract only that section"),
+        tail: z
+          .boolean()
+          .optional()
+          .describe("If true and note exceeds max_chars, keep header + newest tail"),
+        max_chars: z
+          .number()
+          .int()
+          .min(200)
+          .max(100000)
+          .optional()
+          .describe("Max body characters to return (default 16000)"),
       },
     },
-    async ({ path }) => {
+    async ({ path, section, tail, max_chars }) => {
       try {
         const vault = await resolveVault();
         const note = await readNote(vault, path);
-        return textResult(noteToSummary(note));
+        if (section?.trim()) {
+          const span = findMarkdownSection(note.body, section);
+          const slice = note.body.slice(span.start, span.end).trim();
+          return textResult(
+            `path: ${note.path}\ntitle: ${note.title}\nsection: ${span.heading}\n\n${slice}`,
+          );
+        }
+        const limit = max_chars ?? 16000;
+        return textResult(
+          tail ? noteToTailSummary(note, limit) : noteToSummary(note, limit),
+        );
       } catch (err) {
         return errorResult(err);
       }
@@ -282,20 +319,284 @@ export function createBrainServer(): McpServer {
           project,
           limit ?? 20,
         );
+        const packNotes = notes.filter((n) => !/^projects\/[^/]+\/memories\.md$/.test(n.path));
+        const activeMemories = await listMemories(vault, {
+          scope: "project",
+          project,
+          status: "active",
+          limit: 20,
+        });
         const ensuredLine = ensured.length
           ? `Created: ${ensured.join(", ")}\n`
           : "";
-        if (!notes.length) {
+        if (!packNotes.length && !activeMemories.length) {
           return textResult(
             `${ensuredLine}No project notes yet for: ${project}`,
           );
         }
-        const body = notes
-          .map((n) => `---\n${noteToSummary(n, 1200)}`)
+        const parts = packNotes.map((n) => `---\n${noteToTailSummary(n, 2400)}`);
+        if (activeMemories.length) {
+          const memBlock = activeMemories
+            .map(
+              (m) =>
+                `- [${m.id}] **${m.title}** (${m.category}, ${m.updated}): ${m.content.replace(/\s+/g, " ").slice(0, 240)}`,
+            )
+            .join("\n");
+          parts.push(`---\n## Active Atomic Memories (${activeMemories.length})\n\n${memBlock}`);
+        }
+        const body = parts.join("\n\n");
+        return textResult(
+          `Vault: ${vault}\nProject (git repo): ${project}\n${ensuredLine}Notes: ${packNotes.length}, Active memories: ${activeMemories.length}\n\n${body}`,
+        );
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  );
+
+  // --- Atomic memory tools (Markdown-backed) ---
+
+  server.registerTool(
+    "add_memory",
+    {
+      title: "Add atomic memory",
+      description:
+        "Store an atomic, ID-tracked memory in Markdown (memories/<category>.md or projects/<slug>/memories.md) with write-time secret scanning and automatic deduplication. Pass supersede_id to replace an outdated memory while preserving temporal lineage (inherits scope/project from the old memory; dedupe is skipped when supersede_id is set).",
+      inputSchema: {
+        title: z.string().trim().min(1).describe("Concise single-line memory title"),
+        content: z.string().trim().min(1).describe("Factual memory body (no secrets)"),
+        scope: z
+          .enum(["global", "project"])
+          .optional()
+          .describe("global or project (defaults to project when project is set)"),
+        project: z
+          .string()
+          .optional()
+          .describe("Git repo slug, path, or remote URL (resolved via _meta/projects-index.md)"),
+        category: z
+          .enum(MEMORY_CATEGORIES)
+          .optional()
+          .describe("profile | preferences | decisions | facts | gotchas"),
+        app: z
+          .string()
+          .optional()
+          .describe("Source harness/client name (e.g. cursor, claude, codex, zed)"),
+        tags: z.array(z.string()).optional().describe("Optional tags"),
+        supersede_id: z
+          .string()
+          .trim()
+          .min(1)
+          .optional()
+          .describe("Existing active memory ID to atomically supersede (inherits scope/project)"),
+        dedupe: z
+          .enum(["dedupe", "force"])
+          .optional()
+          .describe("dedupe (default: skip near-exact dupes & flag conflicts) | force"),
+      },
+    },
+    async (args) => {
+      try {
+        const vault = await resolveVault();
+        const res = await addMemorySmart(vault, {
+          title: args.title,
+          content: args.content,
+          scope: args.scope,
+          project: args.project,
+          category: args.category as MemoryCategory | undefined,
+          app: args.app,
+          tags: args.tags,
+          supersedeId: args.supersede_id,
+          dedupe: args.dedupe,
+        });
+        return textResult(JSON.stringify(res, null, 2));
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  );
+
+  server.registerTool(
+    "search_memory",
+    {
+      title: "Search atomic memories",
+      description:
+        "Hybrid semantic + lexical search over atomic memories. Defaults to status=active so superseded memories never pollute recall.",
+      inputSchema: {
+        query: z.string().trim().min(1).describe("Search query"),
+        limit: z.number().int().min(1).max(50).optional().describe("Max results (default 10)"),
+        mode: z.enum(["hybrid", "fts", "vector"]).optional().describe("Retrieval mode (default hybrid)"),
+        scope: z.enum(["global", "project"]).optional(),
+        project: z.string().optional().describe("Filter by git repo slug/path/remote"),
+        category: z.enum(MEMORY_CATEGORIES).optional(),
+        app: z.string().optional().describe("Filter by source harness"),
+        tags: z.array(z.string()).optional(),
+        status: z
+          .enum(["active", "superseded", "all"])
+          .optional()
+          .describe("active (default) | superseded | all"),
+      },
+    },
+    async (args) => {
+      try {
+        const vault = await resolveVault();
+        const res = await searchMemories(vault, args.query, {
+          limit: args.limit ?? 10,
+          mode: args.mode as SearchMode | undefined,
+          scope: args.scope,
+          project: args.project,
+          category: args.category as MemoryCategory | undefined,
+          app: args.app,
+          tags: args.tags,
+          status: args.status ?? "active",
+        });
+        if (!res.hits.length) {
+          return textResult(`No memories matched: ${args.query} (mode=${res.modeUsed})`);
+        }
+        const body = res.hits
+          .map((h, i) => {
+            const m = h.memory;
+            const meta = [
+              `id=${m.id}`,
+              `status=${m.status}`,
+              `cat=${m.category}`,
+              m.project ? `project=${m.project}` : `scope=${m.scope}`,
+              `app=${m.app}`,
+              `updated=${m.updated}`,
+              `via=${h.matchedBy.join("+")}`,
+              h.vectorScore !== null ? `sim=${h.vectorScore}` : null,
+            ]
+              .filter(Boolean)
+              .join(", ");
+            return `${i + 1}. [${m.id}] ${m.title} (${m.path}) [${meta}]\n   ${m.content}`;
+          })
           .join("\n\n");
         return textResult(
-          `Vault: ${vault}\nProject (git repo): ${project}\n${ensuredLine}Notes: ${notes.length}\n\n${body}`,
+          `Memories (mode=${res.modeUsed}, ${res.searchMs}ms)\n\n${body}`,
         );
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  );
+
+  server.registerTool(
+    "list_memories",
+    {
+      title: "List atomic memories",
+      description:
+        "Enumerate structured atomic memories with optional filters (defaults to status=active).",
+      inputSchema: {
+        scope: z.enum(["global", "project"]).optional(),
+        project: z.string().optional(),
+        category: z.enum(MEMORY_CATEGORIES).optional(),
+        app: z.string().optional(),
+        tags: z.array(z.string()).optional(),
+        status: z.enum(["active", "superseded", "all"]).optional(),
+        limit: z.number().int().min(1).max(100).optional(),
+      },
+    },
+    async (args) => {
+      try {
+        const vault = await resolveVault();
+        const items = await listMemories(vault, {
+          scope: args.scope,
+          project: args.project,
+          category: args.category as MemoryCategory | undefined,
+          app: args.app,
+          tags: args.tags,
+          status: args.status ?? "active",
+          limit: args.limit ?? 30,
+        });
+        return textResult(JSON.stringify({ count: items.length, memories: items }, null, 2));
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  );
+
+  server.registerTool(
+    "update_memory",
+    {
+      title: "Update atomic memory",
+      description:
+        "Surgically update an existing atomic memory by ID (preserves ID & created date, bumps updated, runs secret guard).",
+      inputSchema: {
+        id: z.string().trim().min(1).describe("Memory ID (e.g. m_a1b2c3d4)"),
+        title: z.string().trim().min(1).optional(),
+        content: z.string().trim().min(1).optional(),
+        tags: z.array(z.string()).optional(),
+        category: z.enum(MEMORY_CATEGORIES).optional(),
+        app: z.string().optional(),
+      },
+    },
+    async (args) => {
+      try {
+        const vault = await resolveVault();
+        const updated = await updateMemory(vault, {
+          id: args.id,
+          title: args.title,
+          content: args.content,
+          tags: args.tags,
+          category: args.category as MemoryCategory | undefined,
+          app: args.app,
+        });
+        await syncVaultIndex(vault).catch(() => {});
+        return textResult(JSON.stringify(updated, null, 2));
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  );
+
+  server.registerTool(
+    "supersede_memory",
+    {
+      title: "Supersede atomic memory",
+      description:
+        "Replace an outdated memory ID with a new active memory, keeping the old memory in Markdown marked status=superseded with temporal lineage.",
+      inputSchema: {
+        old_id: z.string().trim().min(1).describe("Existing active memory ID to mark superseded"),
+        content: z.string().trim().min(1).describe("Updated memory content"),
+        title: z.string().trim().min(1).optional().describe("Optional new title (defaults to previous title)"),
+        tags: z.array(z.string()).optional(),
+        category: z.enum(MEMORY_CATEGORIES).optional(),
+        app: z.string().optional(),
+      },
+    },
+    async (args) => {
+      try {
+        const vault = await resolveVault();
+        const res = await supersedeMemory(vault, args.old_id, {
+          title: args.title,
+          content: args.content,
+          tags: args.tags,
+          category: args.category as MemoryCategory | undefined,
+          app: args.app,
+        });
+        await syncVaultIndex(vault).catch(() => {});
+        return textResult(JSON.stringify(res, null, 2));
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  );
+
+  server.registerTool(
+    "delete_memory",
+    {
+      title: "Delete atomic memory",
+      description:
+        "Permanently remove an atomic memory block by ID from its Markdown file.",
+      inputSchema: {
+        id: z.string().trim().min(1).describe("Memory ID to delete"),
+      },
+    },
+    async ({ id }) => {
+      try {
+        const vault = await resolveVault();
+        const res = await deleteMemory(vault, id);
+        await syncVaultIndex(vault).catch(() => {});
+        return textResult(JSON.stringify(res, null, 2));
       } catch (err) {
         return errorResult(err);
       }

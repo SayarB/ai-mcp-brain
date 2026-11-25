@@ -5,6 +5,7 @@
 import { createHash } from "node:crypto";
 import { stat } from "node:fs/promises";
 import { posix, resolve } from "node:path";
+import { stripSupersededMemories } from "../memory/store.ts";
 import { readText } from "../runtime.ts";
 import { listNotePaths } from "../vault.ts";
 import {
@@ -19,9 +20,6 @@ import {
   type Embedder,
 } from "./embed.ts";
 import type { SqlDatabase } from "./sqlite.ts";
-
-/** Coalesce concurrent in-process sync calls targeting the same SQLite DB path. */
-const inflightSyncs = new Map<string, Promise<SyncStats>>();
 
 export type SyncOptions = {
   dbPath?: string;
@@ -72,6 +70,36 @@ type PendingFile = {
 
 function sha256(text: string): string {
   return createHash("sha256").update(text).digest("hex");
+}
+
+/** Format chunk text for embedding; aligns atomic memory chunks with `formatMemoryForEmbedding`. */
+function formatChunkForEmbedding(
+  fileTitle: string,
+  fileTags: string[],
+  heading: string,
+  content: string,
+): string {
+  const memMeta = content.match(/<!--\s*mem:(.+?)\s*-->/);
+  if (memMeta?.[1]) {
+    const fields: Record<string, string> = {};
+    for (const part of memMeta[1].trim().split(/\s+/)) {
+      const eq = part.indexOf("=");
+      if (eq > 0) fields[part.slice(0, eq)] = part.slice(eq + 1);
+    }
+    const titleLeaf = heading.split(" > ").pop()?.trim() || fileTitle;
+    const category = fields.category || "facts";
+    const tags = fields.tags
+      ? fields.tags.split(",").map((t) => t.trim()).filter(Boolean)
+      : [];
+    const tagLine = tags.length ? ` [${tags.join(", ")}]` : "";
+    const cleanBody = content
+      .replace(/^###\s+.+$/m, "")
+      .replace(/<!--\s*\/?mem:[^>]*-->/g, "")
+      .trim();
+    return `${titleLeaf} — ${category}${tagLine}\n${cleanBody}`;
+  }
+  const tagLine = fileTags.length ? ` [${fileTags.join(", ")}]` : "";
+  return `${fileTitle} — ${heading}${tagLine}\n${content}`;
 }
 
 /** Resolve an Obsidian [[wikilink]] target against all known vault paths. */
@@ -196,8 +224,9 @@ export async function syncVaultIndexOnDb(
     }
 
     const { meta, content } = extractNoteMetadata(relPath, rawBody, mtimeMs);
-    const chunks = chunkMarkdown(meta.title, content);
-    const rawLinks = extractWikilinks(content);
+    const activeContent = stripSupersededMemories(relPath, content);
+    const chunks = chunkMarkdown(meta.title, activeContent);
+    const rawLinks = extractWikilinks(activeContent);
 
     pending.push({
       path: relPath,
@@ -228,8 +257,9 @@ export async function syncVaultIndexOnDb(
     for (const file of pending) {
       offsets.push({ path: file.path, count: file.chunks.length });
       for (const ch of file.chunks) {
-        const tagLine = file.tags.length ? ` [${file.tags.join(", ")}]` : "";
-        texts.push(`${file.title} — ${ch.heading}${tagLine}\n${ch.content}`);
+        texts.push(
+          formatChunkForEmbedding(file.title, file.tags, ch.heading, ch.content),
+        );
       }
     }
     try {
@@ -357,8 +387,7 @@ export async function syncVaultIndexOnDb(
           } catch {
             /* ignore */
           }
-          const tagLine = tagsArr.length ? ` [${tagsArr.join(", ")}]` : "";
-          return `${row.title} — ${row.heading}${tagLine}\n${row.content}`;
+          return formatChunkForEmbedding(row.title, tagsArr, row.heading, row.content);
         });
         const vectors = await embedder.embed(texts, "document");
         db.transaction(() => {
@@ -437,22 +466,46 @@ export async function syncVaultIndexOnDb(
   };
 }
 
+/** Serialize in-process sync calls per DB path so post-write syncs always see fresh disk state. */
+const syncQueues = new Map<string, Promise<void>>();
+
 export async function syncVaultIndex(
   vaultPath: string,
   opts?: SyncOptions,
 ): Promise<SyncStats> {
-  const { db, dbPath, rebuilt } = await openIndexDb(vaultPath, {
-    dbPath: opts?.dbPath,
-    forceRebuild: opts?.forceRebuild,
-  });
-  const key = dbPath === ":memory:" ? `:memory:${Math.random()}` : dbPath;
-  const existing = !opts?.forceRebuild ? inflightSyncs.get(key) : undefined;
-  if (existing) {
-    db.close();
-    return existing;
+  const { dbPath } = await (async () => {
+    const resolved = opts?.dbPath;
+    if (resolved) return { dbPath: resolved };
+    const { defaultIndexDbPath } = await import("./db.ts");
+    return { dbPath: defaultIndexDbPath(vaultPath) };
+  })();
+
+  if (dbPath === ":memory:") {
+    const { db, rebuilt } = await openIndexDb(vaultPath, {
+      dbPath,
+      forceRebuild: opts?.forceRebuild,
+    });
+    try {
+      return await syncVaultIndexOnDb(db, vaultPath, dbPath, rebuilt, opts);
+    } finally {
+      db.close();
+    }
   }
 
-  const run = (async () => {
+  const prev = syncQueues.get(dbPath) ?? Promise.resolve();
+  let release!: () => void;
+  const gate = new Promise<void>((r) => {
+    release = r;
+  });
+  const tail = prev.then(() => gate);
+  syncQueues.set(dbPath, tail);
+
+  await prev;
+  try {
+    const { db, rebuilt } = await openIndexDb(vaultPath, {
+      dbPath,
+      forceRebuild: opts?.forceRebuild,
+    });
     try {
       const stats = await syncVaultIndexOnDb(db, vaultPath, dbPath, rebuilt, opts);
       try {
@@ -463,12 +516,11 @@ export async function syncVaultIndex(
       return stats;
     } finally {
       db.close();
-      inflightSyncs.delete(key);
     }
-  })();
-
-  if (dbPath !== ":memory:") {
-    inflightSyncs.set(key, run);
+  } finally {
+    release();
+    if (syncQueues.get(dbPath) === tail) {
+      syncQueues.delete(dbPath);
+    }
   }
-  return run;
 }

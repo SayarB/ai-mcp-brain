@@ -4,7 +4,7 @@ Use YAML frontmatter on notes when practical:
 
 ```yaml
 ---
-type: inbox | project | pattern | stack | media | agent | external | instruction | suggestion | workflow
+type: inbox | project | pattern | stack | media | memory | agent | external | instruction | suggestion | workflow
 kind: coding | pr-review | commit | git | <extensible>   # instructions / suggestions
 id: optional-workflow-id                                 # workflows
 weight: soft                                             # suggestions only

@@ -21,7 +21,8 @@ This Obsidian vault is the source of truth for durable work memory.
 | Action → guidance map | `actions/registry.md` |
 | Cross-repo approaches | `patterns/` |
 | Tools & SaaS (any stack) | `stack/catalog/` + `stack/recent.md` |
-| Distilled talk takeaways | `media/` |
+| Short talk takeaways | `media/` |
+| Atomic ID-tracked memories | `memories/<category>.md` & `projects/<slug>/memories.md` |
 | Agent/orchestrator learnings | `agents/` |
 | Schema / indexes | `_meta/` |
 | Daily focus + work logs | `work/today.md`, `work/log/` (prefer MCP `work_*` tools) |
