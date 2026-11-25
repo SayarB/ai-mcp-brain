@@ -18,6 +18,7 @@ import {
   classifyToolOperation,
   inferNoteScopeAndProject,
   normalizeAppNameOrDefault,
+  resolveRealNoteScopeAndProject,
   summarizeToolCall,
   type AppPolicy,
 } from "../daemon/acl.ts";
@@ -202,8 +203,14 @@ export function createBrainServer(options: BrainServerOptions = {}): McpServer {
         "Diagnostics: resolved vault path, whether it is readable, and note count. Use when vault access seems broken.",
     },
     async () =>
-      runGuarded("vault_info", undefined, async ({ vault }) => {
+      runGuarded("vault_info", undefined, async ({ vault, policy }) => {
         const info = await vaultInfo(vault);
+        if (policy && hasReadRestriction(policy)) {
+          return {
+            result: textResult(JSON.stringify({ readable: info.readable }, null, 2)),
+            resultCount: null,
+          };
+        }
         return {
           result: textResult(JSON.stringify(info, null, 2)),
           resultCount: info.noteCount,
@@ -421,7 +428,7 @@ export function createBrainServer(options: BrainServerOptions = {}): McpServer {
       runGuarded("read_note", args, async ({ vault, policy }) => {
         const { path, section, tail, max_chars } = args;
         if (policy) {
-          const target = inferNoteScopeAndProject(path);
+          const target = await resolveRealNoteScopeAndProject(vault, path);
           assertScopeAccess(policy, "read_note", "read", target.scope, target.project);
         }
         const note = await readNote(vault, path);
@@ -479,15 +486,21 @@ export function createBrainServer(options: BrainServerOptions = {}): McpServer {
     },
     async (args) =>
       runGuarded("remember", args, async ({ vault, policy }) => {
+        const targetScope = args.scope ?? (args.project ? "project" : "global");
+        const targetProject =
+          targetScope === "project" && args.project
+            ? await resolveProjectSlug(vault, args.project)
+            : null;
         if (policy) {
-          const targetScope = args.scope ?? (args.project ? "project" : "global");
-          const targetProject =
-            targetScope === "project" && args.project
-              ? await resolveProjectSlug(vault, args.project)
-              : null;
           assertScopeAccess(policy, "remember", "write", targetScope, targetProject);
         }
         const note = await rememberNote(vault, args);
+        if (policy && !canReadTarget(policy, targetScope, targetProject)) {
+          return {
+            result: textResult(`Wrote ${note.path} (preview omitted by read ACL)`),
+            resultCount: 1,
+          };
+        }
         return {
           result: textResult(`Wrote ${note.path}\n\n${noteToSummary(note, 800)}`),
           resultCount: 1,
@@ -526,13 +539,21 @@ export function createBrainServer(options: BrainServerOptions = {}): McpServer {
         const { notes, ensured } = await getProjectContext(vault, canonical, limit ?? 20, {
           createIfMissing: allowCreate,
         });
-        const packNotes = notes.filter((n) => !/^projects\/[^/]+\/memories\.md$/.test(n.path));
-        const activeMemories = await listMemories(vault, {
+        const packNotes = notes.filter((n) => {
+          if (/^projects\/[^/]+\/memories\.md$/.test(n.path)) return false;
+          if (!policy) return true;
+          const inferred = inferNoteScopeAndProject(n.path);
+          return canReadTarget(policy, inferred.scope, inferred.project);
+        });
+        const rawMemories = await listMemories(vault, {
           scope: "project",
           project: canonical,
           status: "active",
           limit: 20,
         });
+        const activeMemories = policy
+          ? rawMemories.filter((m) => canReadTarget(policy, m.scope, m.project))
+          : rawMemories;
         const ensuredLine = ensured.length
           ? `Created: ${ensured.join(", ")}\n`
           : "";
@@ -638,6 +659,23 @@ export function createBrainServer(options: BrainServerOptions = {}): McpServer {
           dbPath: options.indexDbPath,
           embedder: options.embedder,
         });
+        if (policy && !canReadTarget(policy, res.memory.scope, res.memory.project)) {
+          return {
+            result: textResult(
+              JSON.stringify(
+                {
+                  action: res.action,
+                  id: res.memory.id,
+                  path: res.memory.path,
+                  message: "Stored (existing content & similar candidates redacted by read ACL).",
+                },
+                null,
+                2,
+              ),
+            ),
+            resultCount: 1,
+          };
+        }
         return {
           result: textResult(JSON.stringify(res, null, 2)),
           resultCount: 1,
@@ -956,7 +994,18 @@ export function createBrainServer(options: BrainServerOptions = {}): McpServer {
         if (policy) {
           assertScopeAccess(policy, "list_recent", "read", "global");
         }
-        const entries = await listRecent(vault, args.limit ?? 20);
+        const rawEntries = await listRecent(vault, args.limit ?? 20);
+        const entries = policy
+          ? rawEntries.filter((line) => {
+              const matches = line.matchAll(/\bprojects\/([^/\s)\]]+)\//gi);
+              for (const m of matches) {
+                if (m[1] && !canReadTarget(policy, "project", m[1])) {
+                  return false;
+                }
+              }
+              return true;
+            })
+          : rawEntries;
         if (!entries.length) {
           return { result: textResult("Recent log is empty."), resultCount: 0 };
         }
@@ -997,6 +1046,12 @@ export function createBrainServer(options: BrainServerOptions = {}): McpServer {
           }
         }
         const { catalog, recent } = await trackTool(vault, args);
+        if (policy && !canReadTarget(policy, "global")) {
+          return {
+            result: textResult(`Catalog: ${catalog.path} (preview omitted by read ACL)`),
+            resultCount: 1,
+          };
+        }
         return {
           result: textResult(
             `Catalog: ${catalog.path}\n\n${noteToSummary(catalog, 600)}\n\nRecent head:\n${recent.slice(0, 5).join("\n")}`,
@@ -1152,12 +1207,12 @@ export function createBrainServer(options: BrainServerOptions = {}): McpServer {
     },
     async (args) =>
       runGuarded("upsert_guidance", args, async ({ vault, policy }) => {
+        const targetProject =
+          args.scope === "project" && args.project
+            ? await resolveProjectSlug(vault, args.project)
+            : null;
         if (policy) {
-          const slug =
-            args.scope === "project" && args.project
-              ? await resolveProjectSlug(vault, args.project)
-              : null;
-          assertScopeAccess(policy, "upsert_guidance", "write", args.scope, slug);
+          assertScopeAccess(policy, "upsert_guidance", "write", args.scope, targetProject);
         }
         const note = await upsertGuidance(vault, args);
         const how =
@@ -1168,6 +1223,12 @@ export function createBrainServer(options: BrainServerOptions = {}): McpServer {
               : args.mode === "remove_section"
                 ? "Removed section"
                 : "Wrote";
+        if (policy && !canReadTarget(policy, args.scope, targetProject)) {
+          return {
+            result: textResult(`${how} ${note.path} (preview omitted by read ACL)`),
+            resultCount: 1,
+          };
+        }
         return {
           result: textResult(`${how} ${note.path}\n\n${noteToSummary(note, 800)}`),
           resultCount: 1,

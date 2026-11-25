@@ -1,5 +1,6 @@
 import { homedir, platform } from "node:os";
 import { join, resolve } from "node:path";
+import { z } from "zod";
 import {
   moduleDir,
   parseToml,
@@ -34,6 +35,7 @@ export type DaemonConfig = {
   default_mode?: "read-write" | "read-only" | "disabled";
   auth_token_env?: string;
   allow_remote?: boolean;
+  allowed_origins?: string[];
 };
 
 export type AppConfigEntry = {
@@ -43,7 +45,62 @@ export type AppConfigEntry = {
   write_scopes?: ("global" | "project")[];
   allowed_projects?: string[];
   denied_tools?: string[];
+  /** Optional env var holding a dedicated Bearer token that authenticates & pins this app. */
+  token_env?: string;
 };
+
+const AccessModeSchema = z.enum(["read-write", "read-only", "disabled"]);
+const ScopeSchema = z.enum(["global", "project"]);
+
+const DaemonConfigSchema = z
+  .object({
+    host: z.string().min(1).optional(),
+    port: z.number().int().min(0).max(65535).optional(),
+    default_mode: AccessModeSchema.optional(),
+    auth_token_env: z.string().min(1).optional(),
+    allow_remote: z.boolean().optional(),
+    allowed_origins: z.array(z.string().min(1)).optional(),
+  })
+  .strict();
+
+const AppConfigEntrySchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    mode: AccessModeSchema.optional(),
+    read_scopes: z.array(ScopeSchema).optional(),
+    write_scopes: z.array(ScopeSchema).optional(),
+    allowed_projects: z.array(z.string()).optional(),
+    denied_tools: z.array(z.string()).optional(),
+    token_env: z.string().min(1).optional(),
+  })
+  .strict();
+
+export function parseDaemonConfig(raw: unknown): DaemonConfig {
+  const res = DaemonConfigSchema.safeParse(raw);
+  if (!res.success) {
+    throw new Error(
+      `Invalid [daemon] config: ${res.error.issues.map((i) => `${i.path.join(".") || "daemon"}: ${i.message}`).join("; ")}`,
+    );
+  }
+  return res.data;
+}
+
+export function parseAppsConfig(raw: unknown): Record<string, AppConfigEntry> {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error("Invalid [apps] config: expected a table of [apps.<name>] entries");
+  }
+  const out: Record<string, AppConfigEntry> = {};
+  for (const [name, entry] of Object.entries(raw as Record<string, unknown>)) {
+    const res = AppConfigEntrySchema.safeParse(entry);
+    if (!res.success) {
+      throw new Error(
+        `Invalid [apps.${name}] config: ${res.error.issues.map((i) => `${i.path.join(".") || name}: ${i.message}`).join("; ")}`,
+      );
+    }
+    out[name] = res.data;
+  }
+  return out;
+}
 
 export type BrainConfig = {
   vault_path: string;
@@ -97,19 +154,21 @@ function repoRoot(): string {
   return resolve(moduleDir(import.meta.url), "..");
 }
 
-function extractTomlTables(raw: string, prefixes: string[]): string {
+const TOML_HEADER_RE = /^\s*\[\s*([^\]]+?)\s*\](?:\s*#.*)?$/;
+
+export function extractTomlTables(raw: string, prefixes: string[]): string {
   const lines = raw.split(/\r?\n/);
   const blocks: string[] = [];
   let i = 0;
   while (i < lines.length) {
-    const trimmed = lines[i]!.trim();
-    const match = trimmed.match(/^\[([^\]]+)\]$/);
+    const match = lines[i]!.match(TOML_HEADER_RE);
+    const headerName = match?.[1]?.replace(/\s*\.\s*/g, ".");
     if (
-      match &&
-      prefixes.some((p) => match[1] === p || match[1]!.startsWith(`${p}.`))
+      headerName &&
+      prefixes.some((p) => headerName === p || headerName.startsWith(`${p}.`))
     ) {
       let end = i + 1;
-      while (end < lines.length && !/^\s*\[[^\]]+\]\s*$/.test(lines[end]!)) {
+      while (end < lines.length && !TOML_HEADER_RE.test(lines[end]!)) {
         end++;
       }
       blocks.push(lines.slice(i, end).join("\n").trimEnd());
@@ -136,8 +195,8 @@ export async function loadConfig(): Promise<BrainConfig> {
     Partial<BrainConfig> & {
       inject?: Partial<InjectConfig>;
       jira?: JiraConfig;
-      daemon?: DaemonConfig;
-      apps?: Record<string, AppConfigEntry>;
+      daemon?: unknown;
+      apps?: unknown;
     }
   >(await readText(configPath));
   const inj = platformInjectDefaults();
@@ -153,17 +212,8 @@ export async function loadConfig(): Promise<BrainConfig> {
       }
     : undefined;
 
-  const daemon = parsed.daemon
-    ? {
-        host: parsed.daemon.host,
-        port: parsed.daemon.port,
-        default_mode: parsed.daemon.default_mode,
-        auth_token_env: parsed.daemon.auth_token_env,
-        allow_remote: parsed.daemon.allow_remote,
-      }
-    : undefined;
-
-  const apps = parsed.apps && typeof parsed.apps === "object" ? parsed.apps : undefined;
+  const daemon = parsed.daemon !== undefined ? parseDaemonConfig(parsed.daemon) : undefined;
+  const apps = parsed.apps !== undefined ? parseAppsConfig(parsed.apps) : undefined;
 
   return {
     vault_path: parsed.vault_path ?? defaults.vault_path,

@@ -10,7 +10,7 @@
  */
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { randomUUID, timingSafeEqual } from "node:crypto";
+import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { watch as fsWatch, type FSWatcher } from "node:fs";
 import {
   createServer,
@@ -49,6 +49,7 @@ import { isMainModule } from "../runtime.ts";
 import { vaultInfo } from "../vault.ts";
 import {
   normalizeAppNameOrDefault,
+  normalizeDeniedToolList,
   validateAppName,
   type AccessMode,
   type AppPolicyPatch,
@@ -66,7 +67,7 @@ export const DEFAULT_DAEMON_PORT = 4190;
 
 const MAX_BODY_BYTES = 2 * 1024 * 1024; // 2 MiB
 const MAX_MCP_SESSIONS = 64;
-const SESSION_IDLE_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
+const SESSION_IDLE_TTL_MS = 30 * 60 * 1000; // 30 minutes
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
 
 export type DaemonOptions = {
@@ -74,8 +75,12 @@ export type DaemonOptions = {
   host?: string;
   port?: number;
   allowRemote?: boolean;
-  /** Optional bearer token required on /mcp and /api/*. */
+  /** Extra browser Origins allowed when allowRemote is true. */
+  allowedOrigins?: string[];
+  /** Optional admin bearer token required on /mcp and /api/*. */
   authToken?: string;
+  /** Optional per-app bearer tokens (`app -> token`). Each token authenticates and pins its app on /mcp. */
+  appTokens?: Record<string, string>;
   /** Override SQLite paths (useful in tests). */
   stateDbPath?: string;
   indexDbPath?: string;
@@ -189,11 +194,16 @@ function isAllowedLoopbackHostHeader(hostHeader: string | undefined): boolean {
   return hostname === "127.0.0.1" || hostname === "localhost";
 }
 
-function isAllowedOrigin(originHeader: string | undefined, boundPort: number): boolean {
+function isAllowedOrigin(
+  originHeader: string | undefined,
+  boundPort: number,
+  extraAllowedOrigins: Set<string>,
+): boolean {
   if (!originHeader) return true; // Non-browser MCP/CLI clients omit Origin
   try {
     const u = new URL(originHeader);
     if (u.protocol !== "http:" && u.protocol !== "https:") return false;
+    if (extraAllowedOrigins.has(u.origin.toLowerCase())) return true;
     const host = u.hostname.toLowerCase();
     if (host !== "127.0.0.1" && host !== "localhost" && host !== "::1" && host !== "[::1]") {
       return false;
@@ -203,6 +213,12 @@ function isAllowedOrigin(originHeader: string | undefined, boundPort: number): b
   } catch {
     return false;
   }
+}
+
+function isJsonContentType(contentType: string | undefined): boolean {
+  if (!contentType) return false;
+  const mediaType = contentType.split(";")[0]?.trim().toLowerCase() ?? "";
+  return mediaType === "application/json" || mediaType.endsWith("+json");
 }
 
 function extractAuthToken(req: IncomingMessage): string | null {
@@ -273,6 +289,43 @@ export async function startBrainDaemon(
       ? options.authToken.trim() || null
       : process.env[tokenEnvName]?.trim() || null;
 
+  // Build per-app token map from options.appTokens + config.toml [apps.<name>] token_env
+  const appTokens = new Map<string, string>();
+  if (configApps) {
+    for (const [rawName, entry] of Object.entries(configApps)) {
+      const envName = entry.token_env?.trim();
+      if (!envName) continue;
+      const val = process.env[envName]?.trim();
+      if (val) {
+        appTokens.set(validateAppName(rawName), val);
+      }
+    }
+  }
+  if (options.appTokens) {
+    for (const [rawName, rawTok] of Object.entries(options.appTokens)) {
+      const tok = rawTok.trim();
+      if (tok) {
+        appTokens.set(validateAppName(rawName), tok);
+      }
+    }
+  }
+
+  const anyTokenConfigured = Boolean(authToken || appTokens.size > 0);
+  if (allowRemote && !anyTokenConfigured) {
+    throw new Error(
+      "Refusing to start brain daemon with allowRemote without an auth token. Set BRAIN_DAEMON_TOKEN (or [daemon] auth_token_env / per-app token_env).",
+    );
+  }
+
+  const extraAllowedOrigins = new Set<string>();
+  for (const rawOrigin of [...(daemonCfg.allowed_origins ?? []), ...(options.allowedOrigins ?? [])]) {
+    try {
+      extraAllowedOrigins.add(new URL(rawOrigin).origin.toLowerCase());
+    } catch {
+      throw new Error(`Invalid allowed_origins entry: "${rawOrigin}"`);
+    }
+  }
+
   const stateStore = await DaemonStateStore.open(vaultPath, {
     dbPath: options.stateDbPath,
     daemonConfig: daemonCfg,
@@ -280,6 +333,7 @@ export async function startBrainDaemon(
   });
 
   const sessions = new Map<string, ManagedSession>();
+  let inFlightInitializations = 0;
   const sseClients = new Set<ServerResponse>();
   const startedAt = Date.now();
   let indexReady = false;
@@ -311,6 +365,19 @@ export async function startBrainDaemon(
     }
   };
 
+  const evictLruSession = (): boolean => {
+    let oldest: ManagedSession | null = null;
+    for (const session of sessions.values()) {
+      if (!oldest || session.lastUsedAt < oldest.lastUsedAt) {
+        oldest = session;
+      }
+    }
+    if (!oldest) return false;
+    sessions.delete(oldest.id);
+    void oldest.server.close().catch(() => {});
+    return true;
+  };
+
   const sweepTimer = setInterval(evictIdleSessions, 5 * 60 * 1000);
   sweepTimer.unref?.();
 
@@ -329,6 +396,7 @@ export async function startBrainDaemon(
     req: IncomingMessage,
     res: ServerResponse,
     url: URL,
+    pinnedApp: string | null,
   ): Promise<void> {
     const method = (req.method ?? "GET").toUpperCase();
     if (method !== "POST" && method !== "GET" && method !== "DELETE") {
@@ -343,14 +411,27 @@ export async function startBrainDaemon(
         ? rawSessionId.trim()
         : undefined;
 
+    const explicitAppRaw =
+      url.searchParams.get("app") ||
+      (typeof req.headers["x-brain-app"] === "string" ? req.headers["x-brain-app"] : "");
     let reqApp: string;
     try {
-      reqApp = parseAppFromRequest(url, req);
+      reqApp = pinnedApp
+        ? (() => {
+            if (explicitAppRaw && validateAppName(explicitAppRaw) !== pinnedApp) {
+              throw new Error(
+                `Token belongs to app "${pinnedApp}", cannot assert app "${explicitAppRaw}"`,
+              );
+            }
+            return pinnedApp;
+          })()
+        : parseAppFromRequest(url, req);
     } catch (err) {
+      const isAppMismatch = Boolean(pinnedApp && explicitAppRaw);
       sendJsonRpcError(
         res,
-        400,
-        -32602,
+        isAppMismatch ? 403 : 400,
+        isAppMismatch ? -32003 : -32602,
         err instanceof Error ? err.message : "Invalid app parameter",
       );
       return;
@@ -377,10 +458,7 @@ export async function startBrainDaemon(
         return;
       }
       // Prevent one app from hijacking another app's session
-      const explicitApp =
-        url.searchParams.get("app") ||
-        (typeof req.headers["x-brain-app"] === "string" ? req.headers["x-brain-app"] : "");
-      if (explicitApp && reqApp !== existing.app) {
+      if ((explicitAppRaw || pinnedApp) && reqApp !== existing.app) {
         sendJsonRpcError(
           res,
           403,
@@ -406,50 +484,56 @@ export async function startBrainDaemon(
     }
 
     evictIdleSessions();
-    if (sessions.size >= MAX_MCP_SESSIONS) {
-      sendJsonRpcError(res, 503, -32000, "Too many active MCP sessions");
-      return;
+    // Reserve capacity synchronously before async handshake, evicting LRU idle/oldest sessions
+    while (sessions.size + inFlightInitializations >= MAX_MCP_SESSIONS) {
+      if (!evictLruSession()) {
+        sendJsonRpcError(res, 503, -32000, "Too many concurrent MCP initializations");
+        return;
+      }
     }
+    inFlightInitializations++;
 
-    // Register app immediately on connect so it appears in the dashboard
-    stateStore.touchApp(reqApp);
+    try {
+      const mcpServer = createBrainServer({
+        vaultPath,
+        indexDbPath: options.indexDbPath,
+        embedder: options.embedder,
+        app: reqApp,
+        lockAppProvenance: true,
+        stateStore,
+        onAccessEvent,
+      });
 
-    const mcpServer = createBrainServer({
-      vaultPath,
-      indexDbPath: options.indexDbPath,
-      embedder: options.embedder,
-      app: reqApp,
-      lockAppProvenance: true,
-      stateStore,
-      onAccessEvent,
-    });
+      const transport = new StreamableHTTPServerTransport({
+        sessionIdGenerator: () => randomUUID(),
+        onsessioninitialized: (sid) => {
+          stateStore.touchApp(reqApp);
+          const now = Date.now();
+          sessions.set(sid, {
+            id: sid,
+            app: reqApp,
+            server: mcpServer,
+            transport,
+            createdAt: now,
+            lastUsedAt: now,
+          });
+        },
+      });
 
-    const transport = new StreamableHTTPServerTransport({
-      sessionIdGenerator: () => randomUUID(),
-      onsessioninitialized: (sid) => {
-        const now = Date.now();
-        sessions.set(sid, {
-          id: sid,
-          app: reqApp,
-          server: mcpServer,
-          transport,
-          createdAt: now,
-          lastUsedAt: now,
-        });
-      },
-    });
-
-    await mcpServer.connect(transport);
-    const prevOnClose = transport.onclose;
-    let cleanedUp = false;
-    transport.onclose = () => {
-      if (cleanedUp) return;
-      cleanedUp = true;
-      const sid = transport.sessionId;
-      if (sid) sessions.delete(sid);
-      prevOnClose?.();
-    };
-    await transport.handleRequest(req, res, parsedBody);
+      await mcpServer.connect(transport);
+      const prevOnClose = transport.onclose;
+      let cleanedUp = false;
+      transport.onclose = () => {
+        if (cleanedUp) return;
+        cleanedUp = true;
+        const sid = transport.sessionId;
+        if (sid) sessions.delete(sid);
+        prevOnClose?.();
+      };
+      await transport.handleRequest(req, res, parsedBody);
+    } finally {
+      inFlightInitializations--;
+    }
   }
 
   async function handleApiRequest(
@@ -459,6 +543,16 @@ export async function startBrainDaemon(
   ): Promise<void> {
     const method = (req.method ?? "GET").toUpperCase();
     const pathname = url.pathname;
+
+    // Require application/json on mutating /api/* calls to block simple cross-origin form/text POSTs
+    if (method === "POST" || method === "PUT" || method === "PATCH") {
+      if (!isJsonContentType(req.headers["content-type"])) {
+        sendJson(res, 415, {
+          error: "Unsupported Media Type: expected Content-Type: application/json",
+        });
+        return;
+      }
+    }
 
     // GET /api/events — live SSE stream for dashboard
     if (pathname === "/api/events" && method === "GET") {
@@ -582,7 +676,10 @@ export async function startBrainDaemon(
           patch.allowedProjects = parseStrictStringArray(raw.allowedProjects, "allowedProjects");
         }
         if (raw.deniedTools !== undefined) {
-          patch.deniedTools = parseStrictStringArray(raw.deniedTools, "deniedTools");
+          patch.deniedTools = normalizeDeniedToolList(
+            parseStrictStringArray(raw.deniedTools, "deniedTools"),
+            "deniedTools",
+          );
         }
         const appName = validateAppName(decodeURIComponent(appMatch[1]!));
         const updated = stateStore.upsertAppOverride(appName, patch);
@@ -623,6 +720,16 @@ export async function startBrainDaemon(
 
     if (pathname === "/api/logs" && method === "DELETE") {
       const deleted = stateStore.clearLogs();
+      const entry = stateStore.recordAccess({
+        app: "ui",
+        tool: "clear_logs",
+        operation: "write",
+        status: "ok",
+        summary: `Cleared ${deleted} access log entries`,
+        resultCount: deleted,
+        durationMs: 0,
+      });
+      onAccessEvent(entry);
       sendJson(res, 200, { ok: true, deleted });
       return;
     }
@@ -854,8 +961,6 @@ export async function startBrainDaemon(
     sendJson(res, 404, { error: `Not found: ${method} ${pathname}` });
   }
 
-  const dashboardHtml = renderDashboardHtml({ tokenRequired: Boolean(authToken) });
-
   const httpServer = createServer(async (req, res) => {
     try {
       // 1. DNS rebinding protection when bound to loopback
@@ -866,21 +971,21 @@ export async function startBrainDaemon(
 
       const url = new URL(req.url ?? "/", `http://${host}:${boundPort}`);
       const pathname = url.pathname;
-      const isApiOrMcp =
-        pathname === "/mcp" ||
-        pathname === "/mcp/" ||
-        pathname.startsWith("/api/");
+      const isMcpPath = pathname === "/mcp" || pathname === "/mcp/";
+      const isApiPath = pathname.startsWith("/api/");
+      const isApiOrMcp = isMcpPath || isApiPath;
 
-      // 2. Origin CSRF protection for browser requests hitting /mcp or /api/*
-      if (isApiOrMcp && !allowRemote && !isAllowedOrigin(req.headers.origin, boundPort)) {
+      // 2. Origin CSRF protection for browser requests hitting /mcp or /api/* (active in both loopback & remote modes)
+      if (isApiOrMcp && !isAllowedOrigin(req.headers.origin, boundPort, extraAllowedOrigins)) {
         sendJson(res, 403, { error: "Forbidden: cross-origin request rejected" });
         return;
       }
 
-      // 3. Optional Bearer token auth on /mcp and /api/*
-      if (isApiOrMcp && authToken) {
+      // 3. Bearer token auth (global admin token and/or per-app pinned tokens)
+      let pinnedApp: string | null = null;
+      if (isApiOrMcp && anyTokenConfigured) {
         const provided = extractAuthToken(req);
-        if (!provided || !constantTimeEquals(provided, authToken)) {
+        if (!provided) {
           res.writeHead(401, {
             "Content-Type": "application/json; charset=utf-8",
             "WWW-Authenticate": 'Bearer realm="ai-mcp-brain"',
@@ -888,30 +993,57 @@ export async function startBrainDaemon(
           res.end(JSON.stringify({ error: "Unauthorized: valid daemon token required" }));
           return;
         }
+        const isAdmin = Boolean(authToken && constantTimeEquals(provided, authToken));
+        if (!isAdmin) {
+          let matchedApp: string | null = null;
+          for (const [appName, appTok] of appTokens.entries()) {
+            if (constantTimeEquals(provided, appTok)) {
+              matchedApp = appName;
+              break;
+            }
+          }
+          if (!matchedApp) {
+            res.writeHead(401, {
+              "Content-Type": "application/json; charset=utf-8",
+              "WWW-Authenticate": 'Bearer realm="ai-mcp-brain"',
+            });
+            res.end(JSON.stringify({ error: "Unauthorized: invalid daemon token" }));
+            return;
+          }
+          if (isApiPath) {
+            sendJson(res, 403, {
+              error: "Forbidden: per-app token cannot access daemon admin API",
+            });
+            return;
+          }
+          pinnedApp = matchedApp;
+        }
       }
 
-      // 4. Dashboard UI at GET /
+      // 4. Dashboard UI at GET / (per-request CSP nonce)
       if ((pathname === "/" || pathname === "/index.html") && (req.method ?? "GET") === "GET") {
+        const nonce = randomBytes(16).toString("base64");
+        const html = renderDashboardHtml({ tokenRequired: anyTokenConfigured, nonce });
         res.writeHead(200, {
           "Content-Type": "text/html; charset=utf-8",
           "Cache-Control": "no-store",
           "X-Content-Type-Options": "nosniff",
           "X-Frame-Options": "DENY",
           "Content-Security-Policy":
-            "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data:; connect-src 'self'",
+            `default-src 'self'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`,
         });
-        res.end(dashboardHtml);
+        res.end(html);
         return;
       }
 
       // 5. Streamable HTTP MCP endpoint
-      if (pathname === "/mcp" || pathname === "/mcp/") {
-        await handleMcpRequest(req, res, url);
+      if (isMcpPath) {
+        await handleMcpRequest(req, res, url, pinnedApp);
         return;
       }
 
       // 6. Local control REST API
-      if (pathname.startsWith("/api/")) {
+      if (isApiPath) {
         await handleApiRequest(req, res, url);
         return;
       }

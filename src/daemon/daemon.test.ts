@@ -1,15 +1,18 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, symlink } from "node:fs/promises";
 import http from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { extractTomlTables, parseAppsConfig, parseDaemonConfig } from "../config.ts";
 import type { Embedder } from "../index/index.ts";
 import { pathExists, writeText } from "../runtime.ts";
 import {
   DaemonStateStore,
+  defaultAppPolicy,
+  mergeAppPolicy,
   startBrainDaemon,
   validateAppName,
 } from "./index.ts";
@@ -492,7 +495,7 @@ describe("local HTTP daemon, Streamable HTTP MCP, ACLs, access log & dashboard",
       });
       assert.equal(hijack.status, 403);
 
-      // 6. Non-loopback host refused without allowRemote
+      // 6. Non-loopback host refused without allowRemote; allowRemote refused without token
       await assert.rejects(
         () =>
           startBrainDaemon({
@@ -505,8 +508,313 @@ describe("local HTTP daemon, Streamable HTTP MCP, ACLs, access log & dashboard",
           }),
         /non-loopback/i,
       );
+      await assert.rejects(
+        () =>
+          startBrainDaemon({
+            vaultPath: vault,
+            host: "127.0.0.1",
+            port: 0,
+            allowRemote: true,
+            authToken: "",
+            stateDbPath: ":memory:",
+            warmup: false,
+            quiet: true,
+          }),
+        /allowRemote without an auth token/i,
+      );
     } finally {
       await daemon.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("Opus review regressions: B1 get_project_context isolation, M1 LRU session cap, M2 remote Origin & Content-Type, M3 per-app tokens, M4 strict validation, and Minors", async () => {
+    // M4: malformed config fails loudly & deniedTools ["*"] denies all; unknown tool fails loudly
+    assert.throws(() => parseDaemonConfig({ default_mode: "readonly" }), /Invalid \[daemon\]/);
+    assert.throws(() => parseAppsConfig({ x: { allowed_projects: "api" } }), /Invalid \[apps\.x\]/);
+    assert.throws(
+      () => mergeAppPolicy(defaultAppPolicy("x"), { deniedTools: ["delet_memory"] }),
+      /Unknown tool/,
+    );
+    const denyAll = mergeAppPolicy(defaultAppPolicy("x"), { deniedTools: ["*"] });
+    assert.deepEqual(denyAll.deniedTools, ["*"]);
+
+    // Minor #6: writeConfig / extractTomlTables preserves headers with trailing comments & spaces
+    const sampleToml = [
+      'vault_path = "~/Vault"',
+      "",
+      "[daemon] # local server",
+      "port = 4190",
+      "",
+      "[ apps.cursor ]",
+      'mode = "read-only"',
+      "",
+      "[other]",
+      "ignored = true",
+    ].join("\n");
+    const preserved = extractTomlTables(sampleToml, ["daemon", "apps"]);
+    assert.ok(preserved.includes("[daemon] # local server"));
+    assert.ok(preserved.includes("[ apps.cursor ]"));
+    assert.ok(!preserved.includes("[other]"));
+
+    const root = await mkdtemp(join(tmpdir(), "ai-mcp-brain-reg-"));
+    const vault = join(root, "vault");
+    const stateDb = join(root, "daemon.sqlite");
+    const adminToken = makeSynthSecret(24, 3);
+    const apiBotToken = makeSynthSecret(24, 17);
+
+    await writeText(join(vault, "projects/api/README.md"), "# api\nCore API repo.\n");
+    await writeText(join(vault, "projects/api-secrets/README.md"), "# api-secrets\nTop secret sibling.\n");
+    await writeText(join(vault, "projects/rapid/README.md"), "# rapid\nSubstring collision.\n");
+    await writeText(
+      join(vault, "patterns/global-tagged.md"),
+      "---\ntype: pattern\nproject: api\n---\n\n# Global Tagged\nGlobal body must not leak.\n",
+    );
+    await writeText(
+      join(vault, "stack/recent.md"),
+      "# Recent\n\n- 2026-11-25 **ToolA** — used in projects/api/tools.md\n- 2026-11-25 **ToolB** — used in projects/api-secrets/tools.md\n",
+    );
+    // Minor #11: symlink inside global folder pointing into restricted project
+    await writeText(join(vault, "inbox/placeholder.md"), "# Placeholder\n");
+    await symlink(
+      join(vault, "projects/api-secrets/README.md"),
+      join(vault, "inbox/sneaky-link.md"),
+    );
+
+    const daemon = await startBrainDaemon({
+      vaultPath: vault,
+      port: 0,
+      allowRemote: true,
+      allowedOrigins: ["https://trusted.example"],
+      authToken: adminToken,
+      appTokens: { "api-bot": apiBotToken },
+      stateDbPath: stateDb,
+      indexDbPath: join(root, "idx.sqlite"),
+      embedder: null,
+      warmup: false,
+      watchVault: false,
+      quiet: true,
+      configApps: {
+        "api-bot": {
+          mode: "read-only",
+          read_scopes: ["project"],
+          allowed_projects: ["api"],
+        },
+        "global-writer": {
+          mode: "read-write",
+          read_scopes: ["project"],
+          write_scopes: ["global"],
+          allowed_projects: ["api"],
+        },
+        "recent-reader": {
+          mode: "read-only",
+          read_scopes: ["global", "project"],
+          allowed_projects: ["api"],
+        },
+      },
+    });
+
+    const apiClient = new Client({ name: "api-bot", version: "1.0.0" });
+    const writerClient = new Client({ name: "global-writer", version: "1.0.0" });
+    const recentClient = new Client({ name: "recent-reader", version: "1.0.0" });
+
+    try {
+      // M2: remote mode still blocks untrusted Origin and text/plain POSTs
+      const textPost = await rawHttpRequest({
+        port: daemon.port,
+        path: "/api/memories",
+        method: "POST",
+        headers: {
+          Host: `127.0.0.1:${daemon.port}`,
+          Authorization: `Bearer ${adminToken}`,
+          "Content-Type": "text/plain",
+        },
+        body: JSON.stringify({ title: "Injected", content: "Should fail 415" }),
+      });
+      assert.equal(textPost.status, 415);
+
+      const evilRemoteOrigin = await rawHttpRequest({
+        port: daemon.port,
+        path: "/api/health",
+        method: "GET",
+        headers: {
+          Host: `127.0.0.1:${daemon.port}`,
+          Origin: "https://evil.example",
+          Authorization: `Bearer ${adminToken}`,
+        },
+      });
+      assert.equal(evilRemoteOrigin.status, 403);
+
+      const trustedRemoteOrigin = await rawHttpRequest({
+        port: daemon.port,
+        path: "/api/health",
+        method: "GET",
+        headers: {
+          Host: `127.0.0.1:${daemon.port}`,
+          Origin: "https://trusted.example",
+          Authorization: `Bearer ${adminToken}`,
+        },
+      });
+      assert.equal(trustedRemoteOrigin.status, 200);
+
+      // M3: per-app token cannot access admin /api/* or impersonate another app on /mcp
+      const appTokenOnApi = await fetch(`${daemon.url}/api/apps`, {
+        headers: { Authorization: `Bearer ${apiBotToken}` },
+      });
+      assert.equal(appTokenOnApi.status, 403);
+
+      const appTokenSpoof = await fetch(`${daemon.url}/mcp?app=admin-other`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json, text/event-stream",
+          Authorization: `Bearer ${apiBotToken}`,
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "initialize",
+          params: {
+            protocolVersion: "2025-03-26",
+            capabilities: {},
+            clientInfo: { name: "spoof", version: "1.0.0" },
+          },
+        }),
+      });
+      assert.equal(appTokenSpoof.status, 403);
+
+      // Connect real clients
+      await apiClient.connect(
+        new StreamableHTTPClientTransport(new URL(daemon.mcpUrl), {
+          requestInit: { headers: { Authorization: `Bearer ${apiBotToken}` } },
+        }),
+      );
+      await writerClient.connect(
+        new StreamableHTTPClientTransport(new URL(`${daemon.mcpUrl}?app=global-writer`), {
+          requestInit: { headers: { Authorization: `Bearer ${adminToken}` } },
+        }),
+      );
+      await recentClient.connect(
+        new StreamableHTTPClientTransport(new URL(`${daemon.mcpUrl}?app=recent-reader`), {
+          requestInit: { headers: { Authorization: `Bearer ${adminToken}` } },
+        }),
+      );
+
+      // B1: get_project_context on "api" must NOT leak api-secrets, rapid, or global-tagged note
+      const ctxRes = await apiClient.callTool({
+        name: "get_project_context",
+        arguments: { project: "api" },
+      });
+      assert.ok(!ctxRes.isError);
+      const ctxText = textOf(ctxRes);
+      assert.ok(ctxText.includes("Core API repo."));
+      assert.ok(!ctxText.includes("Top secret sibling."));
+      assert.ok(!ctxText.includes("Substring collision."));
+      assert.ok(!ctxText.includes("Global body must not leak."));
+
+      // Minor #3: vault_info hides absolute path & global noteCount for restricted app
+      const infoRes = await apiClient.callTool({ name: "vault_info", arguments: {} });
+      const infoJson = JSON.parse(textOf(infoRes)) as Record<string, unknown>;
+      assert.equal(infoJson.readable, true);
+      assert.equal(infoJson.vaultPath, undefined);
+      assert.equal(infoJson.noteCount, undefined);
+
+      // Minor #11: symlink inside inbox pointing to projects/api-secrets is denied even for global reader
+      const symRes = await recentClient.callTool({
+        name: "read_note",
+        arguments: { path: "inbox/sneaky-link.md" },
+      });
+      assert.equal(symRes.isError, true);
+      assert.match(textOf(symRes), /ACL denied/i);
+
+      // Minor #2: list_recent strips entries referencing disallowed projects/api-secrets/
+      const recRes = await recentClient.callTool({ name: "list_recent", arguments: {} });
+      assert.ok(!recRes.isError);
+      const recText = textOf(recRes);
+      assert.ok(recText.includes("ToolA"));
+      assert.ok(!recText.includes("ToolB"));
+
+      // Minor #1: write-only global app does NOT receive existing global content / similarExisting back
+      const w1 = await writerClient.callTool({
+        name: "add_memory",
+        arguments: {
+          title: "Secret global fact",
+          content: "Existing sensitive global operational note.",
+          scope: "global",
+          category: "facts",
+        },
+      });
+      assert.ok(!w1.isError);
+      const w2 = await writerClient.callTool({
+        name: "add_memory",
+        arguments: {
+          title: "Secret global fact",
+          content: "Existing sensitive global operational note.",
+          scope: "global",
+          category: "facts",
+        },
+      });
+      assert.ok(!w2.isError);
+      const w2Text = textOf(w2);
+      assert.ok(!w2Text.includes("Existing sensitive global operational note."));
+      assert.ok(!w2Text.includes("similarExisting"));
+
+      // Minor #8: DELETE /api/logs leaves a clear_logs audit trail entry
+      const clearRes = await fetch(`${daemon.url}/api/logs`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${adminToken}` },
+      });
+      assert.equal(clearRes.status, 200);
+      const afterClear = await fetch(`${daemon.url}/api/logs`, {
+        headers: { Authorization: `Bearer ${adminToken}` },
+      });
+      const afterClearJson = (await afterClear.json()) as {
+        logs: { tool: string }[];
+      };
+      assert.equal(afterClearJson.logs.length, 1);
+      assert.equal(afterClearJson.logs[0]?.tool, "clear_logs");
+
+      // M1: 65 initialize calls evict LRU instead of locking out with 503
+      for (let i = 0; i < 65; i++) {
+        const res = await fetch(`${daemon.url}/mcp?app=churn`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json, text/event-stream",
+            Authorization: `Bearer ${adminToken}`,
+          },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: i + 1,
+            method: "initialize",
+            params: {
+              protocolVersion: "2025-03-26",
+              capabilities: {},
+              clientInfo: { name: `churn-${i}`, version: "1.0.0" },
+            },
+          }),
+        });
+        assert.equal(res.status, 200, `init #${i + 1} should succeed via LRU eviction`);
+      }
+      assert.ok(daemon.activeSessionCount() <= 64);
+
+      await Promise.all([apiClient.close(), writerClient.close(), recentClient.close()]);
+    } finally {
+      await daemon.close();
+      // Minor #5: re-seeding without "api-bot" reverts stale source=config row to auto
+      const reopened = await DaemonStateStore.open(vault, {
+        dbPath: stateDb,
+        configApps: {},
+      });
+      try {
+        const apps = reopened.listApps();
+        const apiBot = apps.find((a) => a.app === "api-bot");
+        assert.ok(apiBot);
+        assert.equal(apiBot.source, "auto");
+        assert.equal(apiBot.mode, "read-write");
+      } finally {
+        reopened.close();
+      }
       await rm(root, { recursive: true, force: true });
     }
   });

@@ -266,6 +266,7 @@ async function cmdAcl(
   pathOverride: string | undefined,
   flags: Record<string, string>,
 ): Promise<void> {
+  await loadEnvFile(join(configDir(), ".env"));
   const [sub, appRaw] = positionals;
   const config = await loadConfig();
   const vaultPath = resolveVaultPath(config.vault_path, pathOverride);

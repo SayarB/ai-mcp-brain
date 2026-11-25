@@ -315,13 +315,10 @@ export async function getProjectContext(
     const underProject = path.startsWith(`projects/${slug}/`);
     const note = await readNote(vaultPath, path);
     const front = note.body.slice(0, 500).toLowerCase();
-    const pathHit =
-      path.startsWith("projects/") && path.toLowerCase().includes(needle);
     const metaHit =
-      front.includes(`project: ${needle}`) ||
-      front.includes(`project: "${needle}"`);
+      new RegExp(`^project:\\s*["']?${needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["']?\\s*$`, "m").test(front);
 
-    if (underProject || pathHit || metaHit) {
+    if (underProject || metaHit) {
       matched.push(note);
     }
   }

@@ -130,11 +130,11 @@ async function injectCursorRules(
   actions.push({ target: "cursor-rules", path: rulePath, action });
 
   const mcpPath = resolve(expandHome(config.inject.cursor_mcp_file));
-  actions.push(await mergeCursorMcp(mcpPath, vaultPath, opts));
+  actions.push(await mergeCursorMcp(mcpPath, vaultPath, config, opts));
 
   // Also write project-local MCP config (Cursor often prefers this in-repo)
   const projectMcp = resolve(configDir(), ".cursor", "mcp.json");
-  actions.push(await mergeCursorMcp(projectMcp, vaultPath, opts));
+  actions.push(await mergeCursorMcp(projectMcp, vaultPath, config, opts));
   actions.push(await mergeCursorHooks(config));
   return actions;
 }
@@ -172,9 +172,19 @@ export async function mergeCursorHooks(
   };
 }
 
+function resolveHttpTokenEnv(config: BrainConfig, appName: string): string | null {
+  const appTokenEnv = config.apps?.[appName]?.token_env?.trim();
+  if (appTokenEnv) return appTokenEnv;
+  const daemonTokenEnv = config.daemon?.auth_token_env?.trim();
+  if (daemonTokenEnv) return daemonTokenEnv;
+  if (process.env.BRAIN_DAEMON_TOKEN?.trim()) return "BRAIN_DAEMON_TOKEN";
+  return null;
+}
+
 async function mergeCursorMcp(
   mcpPath: string,
   vaultPath: string,
+  config: BrainConfig,
   opts?: InjectOptions,
 ): Promise<InjectAction> {
   await mkdir(dirname(mcpPath), { recursive: true });
@@ -192,13 +202,16 @@ async function mergeCursorMcp(
 
   if (opts?.transport === "http") {
     const url = `${normalizeDaemonUrl(opts.daemonUrl)}/mcp?app=cursor`;
-    root.mcpServers["ai-mcp-brain"] = { url };
+    const tokenEnv = resolveHttpTokenEnv(config, "cursor");
+    root.mcpServers["ai-mcp-brain"] = tokenEnv
+      ? { url, headers: { Authorization: `Bearer \${env:${tokenEnv}}` } }
+      : { url };
     await writeText(mcpPath, `${JSON.stringify(root, null, 2)}\n`);
     return {
       target: "cursor-mcp",
       path: mcpPath,
       action: "merged",
-      detail: `mcpServers.ai-mcp-brain (Streamable HTTP: ${url})`,
+      detail: `mcpServers.ai-mcp-brain (Streamable HTTP: ${url}${tokenEnv ? `, auth env: ${tokenEnv}` : ""})`,
     };
   }
 
@@ -239,6 +252,7 @@ async function injectMarkedFile(
 async function injectCodexMcp(
   configPath: string,
   vaultPath: string,
+  config: BrainConfig,
   opts?: InjectOptions,
 ): Promise<InjectAction> {
   await mkdir(dirname(configPath), { recursive: true });
@@ -250,13 +264,15 @@ async function injectCodexMcp(
   let detail: string;
   if (opts?.transport === "http") {
     const url = `${normalizeDaemonUrl(opts.daemonUrl)}/mcp?app=codex`;
+    const tokenEnv = resolveHttpTokenEnv(config, "codex");
     block = [
       CODEX_MCP_START,
       "[mcp_servers.ai-mcp-brain]",
       `url = ${JSON.stringify(url)}`,
+      ...(tokenEnv ? [`bearer_token_env_var = ${JSON.stringify(tokenEnv)}`] : []),
       CODEX_MCP_END,
     ].join("\n");
-    detail = `mcp_servers.ai-mcp-brain (Streamable HTTP: ${url})`;
+    detail = `mcp_servers.ai-mcp-brain (Streamable HTTP: ${url}${tokenEnv ? `, bearer_token_env_var: ${tokenEnv}` : ""})`;
   } else {
     const launch = mcpLaunchConfig(vaultPath, "codex");
     block = [
@@ -523,6 +539,7 @@ export async function injectHarnesses(
       await injectCodexMcp(
         resolve(expandHome(config.inject.codex_config)),
         vaultPath,
+        config,
         opts,
       ),
     );

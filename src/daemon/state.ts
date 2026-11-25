@@ -16,6 +16,7 @@ import {
   defaultAppPolicy,
   mergeAppPolicy,
   redactLogSummary,
+  validateAccessMode,
   validateAppName,
   type AccessMode,
   type AppPolicy,
@@ -230,10 +231,10 @@ export class DaemonStateStore {
   ) {
     this.db = db;
     this.dbPath = dbPath;
-    this.defaultMode = opts?.defaultMode ?? "read-write";
+    this.defaultMode = validateAccessMode(opts?.defaultMode ?? "read-write", "default_mode");
     this.maxLogRows = Math.max(100, opts?.maxLogRows ?? DEFAULT_MAX_LOG_ROWS);
 
-    if (opts?.configApps) {
+    if (opts?.configApps !== undefined) {
       this.seedFromConfig(opts.configApps);
     }
   }
@@ -263,18 +264,17 @@ export class DaemonStateStore {
     });
   }
 
-  /** Seed configured apps from config.toml without overwriting manual UI overrides. */
+  /** Seed configured apps from config.toml without overwriting manual UI overrides, and reconcile removed [apps.*] entries. */
   seedFromConfig(configApps: Record<string, AppConfigEntry>): void {
     const now = new Date().toISOString();
+    this.configPolicies.clear();
+    const activeConfigApps = new Set<string>();
+
     for (const [rawName, entry] of Object.entries(configApps)) {
-      let app: string;
-      try {
-        app = validateAppName(rawName);
-      } catch {
-        continue;
-      }
+      const app = validateAppName(rawName);
       const policy = configEntryToPolicy(app, entry, this.defaultMode);
       this.configPolicies.set(app, policy);
+      activeConfigApps.add(app);
 
       const existing = this.db
         .prepare("SELECT * FROM apps WHERE app = ?")
@@ -283,6 +283,17 @@ export class DaemonStateStore {
         continue;
       }
       this.saveAppRow(policy, "config", existing?.first_seen ?? now, existing?.last_seen ?? now, now);
+    }
+
+    // Reconcile stale source='config' rows whose [apps.<name>] entry was removed from config.toml
+    const existingConfigRows = this.db
+      .prepare("SELECT * FROM apps WHERE source = 'config'")
+      .all<RawAppRow>();
+    for (const row of existingConfigRows) {
+      if (!activeConfigApps.has(row.app)) {
+        const reverted = defaultAppPolicy(row.app, this.defaultMode);
+        this.saveAppRow(reverted, "auto", row.first_seen, row.last_seen, now);
+      }
     }
   }
 

@@ -3,8 +3,12 @@
  * Zero CDN dependencies, works 100% offline, strictly escapes all dynamic content.
  */
 
-export function renderDashboardHtml(opts?: { tokenRequired?: boolean }): string {
+export function renderDashboardHtml(opts?: {
+  tokenRequired?: boolean;
+  nonce?: string;
+}): string {
   const tokenRequired = Boolean(opts?.tokenRequired);
+  const scriptNonceAttr = opts?.nonce ? ` nonce="${opts.nonce.replace(/[^A-Za-z0-9+/=_-]/g, "")}"` : "";
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -437,7 +441,7 @@ export function renderDashboardHtml(opts?: { tokenRequired?: boolean }): string 
 
   <div class="toast" id="toast"></div>
 
-  <script>
+  <script${scriptNonceAttr}>
     const TOKEN_REQUIRED = ${JSON.stringify(tokenRequired)};
     const BASE_ORIGIN = window.location.origin;
     document.getElementById("mcpBaseUrl").textContent = BASE_ORIGIN + "/mcp?app=<name>";

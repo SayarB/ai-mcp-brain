@@ -1,8 +1,10 @@
 /**
  * Per-harness Access Control Lists (ACLs), app identity validation,
- * tool operation classification, scope/project guards, and secret-safe log summaries.
+ * tool operation classification, scope/project guards (with symlink resolution),
+ * and secret-safe log summaries.
  */
-import { posix } from "node:path";
+import { realpath } from "node:fs/promises";
+import { posix, relative, resolve } from "node:path";
 import { scanForSecrets } from "../memory/guard.ts";
 import { slugify } from "../vault.ts";
 
@@ -10,6 +12,34 @@ export type AccessMode = "read-write" | "read-only" | "disabled";
 export type ScopeFilter = "global" | "project";
 export type ToolOperation = "read" | "write";
 export type PolicySource = "config" | "override" | "auto";
+
+export const REGISTERED_TOOL_NAMES = [
+  "vault_info",
+  "search_notes",
+  "read_note",
+  "remember",
+  "get_project_context",
+  "add_memory",
+  "search_memory",
+  "list_memories",
+  "update_memory",
+  "supersede_memory",
+  "delete_memory",
+  "list_recent",
+  "track_tool",
+  "resolve_guidance",
+  "list_guidance",
+  "upsert_guidance",
+  "resolve_action",
+  "list_actions",
+  "jira_assigned",
+  "work_today",
+  "work_plate",
+  "work_log",
+  "jira_release",
+] as const;
+
+const REGISTERED_TOOL_SET = new Set<string>(REGISTERED_TOOL_NAMES);
 
 export type AppPolicy = {
   app: string;
@@ -19,7 +49,7 @@ export type AppPolicy = {
   writeScopes: ScopeFilter[];
   /** Empty array or ["*"] allows all projects; otherwise allowlist of canonical project slugs. */
   allowedProjects: string[];
-  /** Optional list of MCP tool names denied for this app. */
+  /** Optional list of MCP tool names denied for this app. "*" denies all tools. */
   deniedTools: string[];
 };
 
@@ -58,8 +88,17 @@ export function normalizeAppNameOrDefault(raw: string | undefined | null, fallba
   return validateAppName(raw);
 }
 
+export function validateAccessMode(raw: unknown, field = "mode"): AccessMode {
+  if (typeof raw !== "string" || !VALID_MODES.has(raw)) {
+    throw new Error(
+      `Invalid ${field} "${String(raw)}": expected "read-write", "read-only", or "disabled".`,
+    );
+  }
+  return raw as AccessMode;
+}
+
 export function defaultAppPolicy(app: string, defaultMode: AccessMode = "read-write"): AppPolicy {
-  const validMode: AccessMode = VALID_MODES.has(defaultMode) ? defaultMode : "read-write";
+  const validMode = validateAccessMode(defaultMode, "default_mode");
   return {
     app: validateAppName(app),
     enabled: validMode !== "disabled",
@@ -71,46 +110,78 @@ export function defaultAppPolicy(app: string, defaultMode: AccessMode = "read-wr
   };
 }
 
-function normalizeScopeList(raw: unknown, fallback: ScopeFilter[]): ScopeFilter[] {
-  if (!Array.isArray(raw)) return [...fallback];
+function normalizeScopeList(raw: unknown, field: string): ScopeFilter[] {
+  if (!Array.isArray(raw)) {
+    throw new Error(`Invalid ${field}: expected an array of "global" | "project".`);
+  }
   const out: ScopeFilter[] = [];
   for (const item of raw) {
-    if (typeof item !== "string") continue;
+    if (typeof item !== "string") {
+      throw new Error(`Invalid ${field} entry: expected string ("global" | "project").`);
+    }
     const lower = item.trim().toLowerCase();
-    if (VALID_SCOPES.has(lower) && !out.includes(lower as ScopeFilter)) {
+    if (!VALID_SCOPES.has(lower)) {
+      throw new Error(`Invalid ${field} entry "${item}": expected "global" or "project".`);
+    }
+    if (!out.includes(lower as ScopeFilter)) {
       out.push(lower as ScopeFilter);
     }
   }
   return out;
 }
 
-function normalizeStringList(raw: unknown, opts?: { slugifyItems?: boolean }): string[] {
-  if (!Array.isArray(raw)) return [];
+function normalizeProjectAllowList(raw: unknown, field: string): string[] {
+  if (!Array.isArray(raw)) {
+    throw new Error(`Invalid ${field}: expected an array of project slugs (or ["*"]).`);
+  }
   const out: string[] = [];
   for (const item of raw) {
-    if (typeof item !== "string") continue;
+    if (typeof item !== "string") {
+      throw new Error(`Invalid ${field} entry: expected string.`);
+    }
     const trimmed = item.trim();
     if (!trimmed) continue;
     if (trimmed === "*") return [];
-    const val = opts?.slugifyItems ? slugify(trimmed) : trimmed.toLowerCase();
+    const val = slugify(trimmed);
     if (val && !out.includes(val)) out.push(val);
+  }
+  return out;
+}
+
+export function normalizeDeniedToolList(raw: unknown, field = "deniedTools"): string[] {
+  if (!Array.isArray(raw)) {
+    throw new Error(`Invalid ${field}: expected an array of MCP tool names (or ["*"]).`);
+  }
+  const out: string[] = [];
+  for (const item of raw) {
+    if (typeof item !== "string") {
+      throw new Error(`Invalid ${field} entry: expected tool name string.`);
+    }
+    const trimmed = item.trim().toLowerCase();
+    if (!trimmed) continue;
+    if (trimmed === "*") return ["*"];
+    if (!REGISTERED_TOOL_SET.has(trimmed)) {
+      throw new Error(
+        `Unknown tool "${item}" in ${field}. Expected "*" or one of: ${REGISTERED_TOOL_NAMES.join(", ")}`,
+      );
+    }
+    if (!out.includes(trimmed)) out.push(trimmed);
   }
   return out;
 }
 
 export function mergeAppPolicy(base: AppPolicy, patch: AppPolicyPatch): AppPolicy {
   let mode: AccessMode =
-    patch.mode !== undefined
-      ? VALID_MODES.has(patch.mode)
-        ? patch.mode
-        : (() => {
-            throw new Error(`Invalid access mode: ${String(patch.mode)}`);
-          })()
-      : base.mode;
+    patch.mode !== undefined ? validateAccessMode(patch.mode, "mode") : base.mode;
 
   const enabled =
     patch.enabled !== undefined
-      ? Boolean(patch.enabled)
+      ? (() => {
+          if (typeof patch.enabled !== "boolean") {
+            throw new Error(`Invalid enabled value: expected boolean.`);
+          }
+          return patch.enabled;
+        })()
       : mode === "disabled"
         ? false
         : base.enabled;
@@ -122,12 +193,12 @@ export function mergeAppPolicy(base: AppPolicy, patch: AppPolicyPatch): AppPolic
 
   const readScopes =
     patch.readScopes !== undefined
-      ? normalizeScopeList(patch.readScopes, [])
+      ? normalizeScopeList(patch.readScopes, "readScopes")
       : [...base.readScopes];
 
   let writeScopes =
     patch.writeScopes !== undefined
-      ? normalizeScopeList(patch.writeScopes, [])
+      ? normalizeScopeList(patch.writeScopes, "writeScopes")
       : [...base.writeScopes];
 
   // If upgrading from read-only/disabled to read-write without explicitly passing writeScopes,
@@ -143,12 +214,12 @@ export function mergeAppPolicy(base: AppPolicy, patch: AppPolicyPatch): AppPolic
 
   const allowedProjects =
     patch.allowedProjects !== undefined
-      ? normalizeStringList(patch.allowedProjects, { slugifyItems: true })
+      ? normalizeProjectAllowList(patch.allowedProjects, "allowedProjects")
       : [...base.allowedProjects];
 
   const deniedTools =
     patch.deniedTools !== undefined
-      ? normalizeStringList(patch.deniedTools)
+      ? normalizeDeniedToolList(patch.deniedTools, "deniedTools")
       : [...base.deniedTools];
 
   return {
@@ -236,7 +307,7 @@ export function checkToolAccess(
       policy.mode === "disabled" ? "app is disabled" : "app is paused",
     );
   }
-  if (policy.deniedTools.includes(tool.toLowerCase())) {
+  if (policy.deniedTools.includes("*") || policy.deniedTools.includes(tool.toLowerCase())) {
     throw new AclDeniedError(policy.app, tool, `tool "${tool}" is explicitly denied`);
   }
   if (operation === "write" && policy.mode === "read-only") {
@@ -323,6 +394,34 @@ export function inferNoteScopeAndProject(relPath: string): {
   return { scope: "global", project: null };
 }
 
+/**
+ * Resolve symlinks via `realpath` before classifying a vault-relative note path,
+ * preventing symlinks inside the vault from bypassing project/scope ACLs or escaping the vault.
+ */
+export async function resolveRealNoteScopeAndProject(
+  vaultPath: string,
+  relPath: string,
+): Promise<{ scope: ScopeFilter; project: string | null }> {
+  const lexical = inferNoteScopeAndProject(relPath);
+  const absTarget = resolve(vaultPath, relPath.replace(/\\/g, "/").replace(/^\/+/, ""));
+  try {
+    const [realVault, realTarget] = await Promise.all([
+      realpath(vaultPath),
+      realpath(absTarget),
+    ]);
+    const rel = relative(realVault, realTarget).replace(/\\/g, "/");
+    if (!rel || rel === ".." || rel.startsWith("../") || rel.startsWith("/")) {
+      throw new Error(`Path escapes vault via symlink: ${relPath}`);
+    }
+    return inferNoteScopeAndProject(rel);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException)?.code === "ENOENT") {
+      return lexical;
+    }
+    throw err;
+  }
+}
+
 /** Produce a concise, secret-redacted summary string safe to persist in access_log. */
 export function redactLogSummary(raw: string, maxChars = 180): string {
   const compact = raw.replace(/\s+/g, " ").trim();
@@ -364,7 +463,6 @@ export function summarizeToolCall(tool: string, args?: Record<string, unknown>):
       const scope = pick("scope");
       const proj = pick("project");
       const cat = pick("category");
-      // Also check content for secrets so we never even echo a secret-containing title
       const content = pick("content");
       if (content && scanForSecrets(content).length > 0) {
         return "[redacted: potential secret]";
@@ -427,6 +525,10 @@ export function summarizeToolCall(tool: string, args?: Record<string, unknown>):
     }
     case "resolve_guidance":
     case "upsert_guidance": {
+      const content = pick("content");
+      if (content && scanForSecrets(content).length > 0) {
+        return "[redacted: potential secret]";
+      }
       return redactLogSummary(
         [
           pick("type"),
@@ -439,6 +541,10 @@ export function summarizeToolCall(tool: string, args?: Record<string, unknown>):
       );
     }
     case "track_tool": {
+      const sum = pick("summary");
+      if (sum && scanForSecrets(sum).length > 0) {
+        return "[redacted: potential secret]";
+      }
       return redactLogSummary(
         [pick("name"), pick("project") ? `project=${pick("project")}` : null]
           .filter(Boolean)
