@@ -13,6 +13,7 @@ import { JiraNotConfiguredError } from "../jira/client.ts";
 import { join } from "node:path";
 import {
   searchHybrid,
+  syncVaultIndex,
   type HybridSearchOptions,
   type SearchMode,
 } from "../index/index.ts";
@@ -147,12 +148,16 @@ export function createBrainServer(): McpServer {
               ]
                 .filter(Boolean)
                 .join(", ");
-              const headingLine =
-                h.heading && h.heading !== h.title ? ` — ${h.heading}` : "";
+              const label =
+                h.heading && h.heading !== h.title
+                  ? h.heading.startsWith(h.title)
+                    ? h.heading
+                    : `${h.title} — ${h.heading}`
+                  : h.title;
               const linksLine = h.relatedLinks.length
                 ? `\n   links: ${h.relatedLinks.join(", ")}`
                 : "";
-              return `${i + 1}. ${h.path} (${h.title}${headingLine}) [score=${h.score}; ${metaBits}]\n   ${h.snippet}${linksLine}`;
+              return `${i + 1}. ${h.path} (${label}) [score=${h.score}; ${metaBits}]\n   ${h.snippet}${linksLine}`;
             })
             .join("\n\n");
           const warn = result.embedWarning
@@ -801,6 +806,23 @@ async function main(): Promise<void> {
   const server = createBrainServer();
   const transport = new StdioServerTransport();
   await server.connect(transport);
+
+  // Non-blocking background index warm-up so the first search_notes call is fast
+  if (info.readable && process.env.BRAIN_MCP_WARMUP !== "0") {
+    void syncVaultIndex(vault)
+      .then((stats) => {
+        console.error(
+          `[ai-mcp-brain] index ready (${stats.chunksIndexed} chunks, ${stats.durationMs}ms, model=${stats.embedModel ?? "fts-only"})`,
+        );
+      })
+      .catch((err) => {
+        console.error(
+          `[ai-mcp-brain] background index warm-up skipped: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      });
+  }
 }
 
 import { isMainModule } from "../runtime.ts";

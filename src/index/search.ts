@@ -11,7 +11,7 @@ import {
   type Embedder,
 } from "./embed.ts";
 import type { SqlDatabase, SqlValue } from "./sqlite.ts";
-import { syncVaultIndexOnDb, type SyncStats } from "./sync.ts";
+import { syncVaultIndex, syncVaultIndexOnDb, type SyncStats } from "./sync.ts";
 
 export type SearchMode = "hybrid" | "fts" | "vector";
 
@@ -347,18 +347,24 @@ export async function searchHybrid(
   const minVectorScore =
     opts.minVectorScore ?? defaultMinVectorScore(embedder?.model ?? null);
 
+  let syncStats: SyncStats | undefined;
+  if (!opts.skipSync && opts.dbPath !== ":memory:") {
+    syncStats = await syncVaultIndex(vaultPath, {
+      dbPath: opts.dbPath,
+      embedder,
+    });
+  }
+
   const { db, dbPath, rebuilt } = await openIndexDb(vaultPath, {
     dbPath: opts.dbPath,
   });
 
   try {
-    let syncStats: SyncStats | undefined;
-    if (!opts.skipSync) {
+    if (!opts.skipSync && opts.dbPath === ":memory:") {
       syncStats = await syncVaultIndexOnDb(db, vaultPath, dbPath, rebuilt, {
         embedder,
       });
     }
-
     const searchStarted = performance.now();
     const filter = buildFilterWhere(opts);
     const tokens = tokenizeForFts(query);

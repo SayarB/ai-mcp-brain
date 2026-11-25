@@ -20,6 +20,9 @@ import {
 } from "./embed.ts";
 import type { SqlDatabase } from "./sqlite.ts";
 
+/** Coalesce concurrent in-process sync calls targeting the same SQLite DB path. */
+const inflightSyncs = new Map<string, Promise<SyncStats>>();
+
 export type SyncOptions = {
   dbPath?: string;
   forceRebuild?: boolean;
@@ -442,15 +445,30 @@ export async function syncVaultIndex(
     dbPath: opts?.dbPath,
     forceRebuild: opts?.forceRebuild,
   });
-  try {
-    const stats = await syncVaultIndexOnDb(db, vaultPath, dbPath, rebuilt, opts);
-    try {
-      db.exec("PRAGMA wal_checkpoint(TRUNCATE);");
-    } catch {
-      /* ignore checkpoint failure on read-only/in-memory db */
-    }
-    return stats;
-  } finally {
+  const key = dbPath === ":memory:" ? `:memory:${Math.random()}` : dbPath;
+  const existing = !opts?.forceRebuild ? inflightSyncs.get(key) : undefined;
+  if (existing) {
     db.close();
+    return existing;
   }
+
+  const run = (async () => {
+    try {
+      const stats = await syncVaultIndexOnDb(db, vaultPath, dbPath, rebuilt, opts);
+      try {
+        db.exec("PRAGMA wal_checkpoint(TRUNCATE);");
+      } catch {
+        /* ignore checkpoint failure on read-only/in-memory db */
+      }
+      return stats;
+    } finally {
+      db.close();
+      inflightSyncs.delete(key);
+    }
+  })();
+
+  if (dbPath !== ":memory:") {
+    inflightSyncs.set(key, run);
+  }
+  return run;
 }
