@@ -211,7 +211,7 @@ async function cmdDaemon(
   flags: Record<string, string>,
 ): Promise<void> {
   await loadEnvFile(join(configDir(), ".env"));
-  const config = await loadConfig();
+  const config = await loadConfig({ strictDaemon: true });
   const vaultPath = resolveVaultPath(config.vault_path, pathOverride);
   if (pathOverride) {
     process.env.BRAIN_VAULT = vaultPath;
@@ -268,7 +268,7 @@ async function cmdAcl(
 ): Promise<void> {
   await loadEnvFile(join(configDir(), ".env"));
   const [sub, appRaw] = positionals;
-  const config = await loadConfig();
+  const config = await loadConfig({ strictDaemon: true });
   const vaultPath = resolveVaultPath(config.vault_path, pathOverride);
   if (pathOverride) {
     process.env.BRAIN_VAULT = vaultPath;

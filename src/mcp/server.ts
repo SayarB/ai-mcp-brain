@@ -16,7 +16,6 @@ import {
   canWriteTarget,
   checkToolAccess,
   classifyToolOperation,
-  inferNoteScopeAndProject,
   normalizeAppNameOrDefault,
   resolveRealNoteScopeAndProject,
   summarizeToolCall,
@@ -114,6 +113,20 @@ function hasReadRestriction(policy: AppPolicy | null): boolean {
     !policy.readScopes.includes("global") ||
     !policy.readScopes.includes("project")
   );
+}
+
+async function canReadRealNotePath(
+  vault: string,
+  policy: AppPolicy | null,
+  relPath: string,
+): Promise<boolean> {
+  if (!policy) return true;
+  try {
+    const real = await resolveRealNoteScopeAndProject(vault, relPath);
+    return canReadTarget(policy, real.scope, real.project);
+  } catch {
+    return false;
+  }
 }
 
 export function createBrainServer(options: BrainServerOptions = {}): McpServer {
@@ -307,27 +320,31 @@ export function createBrainServer(options: BrainServerOptions = {}): McpServer {
 
         try {
           const result = await searchHybrid(vault, query, opts);
-          const filteredHits = policy
-            ? result.hits
-                .filter((h) => {
-                  const inferred = inferNoteScopeAndProject(h.path);
-                  const pathAllowed = canReadTarget(policy, inferred.scope, inferred.project);
-                  const metaAllowed = h.project
-                    ? canReadTarget(policy, "project", h.project)
-                    : h.scope === "global" || h.scope === "project"
-                      ? canReadTarget(policy, h.scope, h.project)
-                      : true;
-                  return pathAllowed && metaAllowed;
-                })
-                .map((h) => ({
-                  ...h,
-                  relatedLinks: h.relatedLinks.filter((lnk) => {
-                    const inf = inferNoteScopeAndProject(lnk);
-                    return canReadTarget(policy, inf.scope, inf.project);
-                  }),
-                }))
-                .slice(0, requestedLimit)
-            : result.hits.slice(0, requestedLimit);
+          let filteredHits = result.hits;
+          if (policy) {
+            const allowed: typeof result.hits = [];
+            for (const h of result.hits) {
+              if (allowed.length >= requestedLimit) break;
+              const realPathOk = await canReadRealNotePath(vault, policy, h.path);
+              if (!realPathOk) continue;
+              const metaAllowed = h.project
+                ? canReadTarget(policy, "project", h.project)
+                : h.scope === "global" || h.scope === "project"
+                  ? canReadTarget(policy, h.scope, h.project)
+                  : true;
+              if (!metaAllowed) continue;
+              const allowedLinks: string[] = [];
+              for (const lnk of h.relatedLinks) {
+                if (await canReadRealNotePath(vault, policy, lnk)) {
+                  allowedLinks.push(lnk);
+                }
+              }
+              allowed.push({ ...h, relatedLinks: allowedLinks });
+            }
+            filteredHits = allowed;
+          } else {
+            filteredHits = result.hits.slice(0, requestedLimit);
+          }
 
           if (!filteredHits.length) {
             return {
@@ -361,10 +378,11 @@ export function createBrainServer(options: BrainServerOptions = {}): McpServer {
           const warn = result.embedWarning
             ? `\nNote: embeddings unavailable (${result.embedWarning}); used FTS5.`
             : "";
+          const headerPrefix = hasReadRestriction(policy)
+            ? `Search (mode=${result.modeUsed}, ${result.searchMs}ms)`
+            : `Vault: ${vault} (mode=${result.modeUsed}, ${result.searchMs}ms)`;
           return {
-            result: textResult(
-              `Vault: ${vault} (mode=${result.modeUsed}, ${result.searchMs}ms)${warn}\n\n${body}`,
-            ),
+            result: textResult(`${headerPrefix}${warn}\n\n${body}`),
             resultCount: filteredHits.length,
           };
         } catch (indexErr) {
@@ -374,14 +392,19 @@ export function createBrainServer(options: BrainServerOptions = {}): McpServer {
             }`,
           );
           const rawHits = await searchNotes(vault, query, fetchLimit);
-          const hits = policy
-            ? rawHits
-                .filter((h) => {
-                  const inf = inferNoteScopeAndProject(h.path);
-                  return canReadTarget(policy, inf.scope, inf.project);
-                })
-                .slice(0, requestedLimit)
-            : rawHits.slice(0, requestedLimit);
+          let hits = rawHits;
+          if (policy) {
+            const allowed: typeof rawHits = [];
+            for (const h of rawHits) {
+              if (allowed.length >= requestedLimit) break;
+              if (await canReadRealNotePath(vault, policy, h.path)) {
+                allowed.push(h);
+              }
+            }
+            hits = allowed;
+          } else {
+            hits = rawHits.slice(0, requestedLimit);
+          }
           if (!hits.length) {
             return { result: textResult(`No notes matched: ${query}`), resultCount: 0 };
           }
@@ -391,8 +414,11 @@ export function createBrainServer(options: BrainServerOptions = {}): McpServer {
                 `${i + 1}. ${h.path} (${h.title}) [score=${h.score}]\n   ${h.snippet}`,
             )
             .join("\n\n");
+          const legacyHeader = hasReadRestriction(policy)
+            ? "Search (legacy fallback)"
+            : `Vault: ${vault} (legacy fallback)`;
           return {
-            result: textResult(`Vault: ${vault} (legacy fallback)\n\n${body}`),
+            result: textResult(`${legacyHeader}\n\n${body}`),
             resultCount: hits.length,
           };
         }
@@ -539,12 +565,12 @@ export function createBrainServer(options: BrainServerOptions = {}): McpServer {
         const { notes, ensured } = await getProjectContext(vault, canonical, limit ?? 20, {
           createIfMissing: allowCreate,
         });
-        const packNotes = notes.filter((n) => {
-          if (/^projects\/[^/]+\/memories\.md$/.test(n.path)) return false;
-          if (!policy) return true;
-          const inferred = inferNoteScopeAndProject(n.path);
-          return canReadTarget(policy, inferred.scope, inferred.project);
-        });
+        const packNotes: typeof notes = [];
+        for (const n of notes) {
+          if (/^projects\/[^/]+\/memories\.md$/.test(n.path)) continue;
+          if (!(await canReadRealNotePath(vault, policy, n.path))) continue;
+          packNotes.push(n);
+        }
         const rawMemories = await listMemories(vault, {
           scope: "project",
           project: canonical,
@@ -574,9 +600,10 @@ export function createBrainServer(options: BrainServerOptions = {}): McpServer {
           parts.push(`---\n## Active Atomic Memories (${activeMemories.length})\n\n${memBlock}`);
         }
         const body = parts.join("\n\n");
+        const vaultLine = hasReadRestriction(policy) ? "" : `Vault: ${vault}\n`;
         return {
           result: textResult(
-            `Vault: ${vault}\nProject (git repo): ${project}\n${ensuredLine}Notes: ${packNotes.length}, Active memories: ${activeMemories.length}\n\n${body}`,
+            `${vaultLine}Project (git repo): ${project}\n${ensuredLine}Notes: ${packNotes.length}, Active memories: ${activeMemories.length}\n\n${body}`,
           ),
           resultCount: packNotes.length + activeMemories.length,
         };
@@ -664,10 +691,9 @@ export function createBrainServer(options: BrainServerOptions = {}): McpServer {
             result: textResult(
               JSON.stringify(
                 {
-                  action: res.action,
-                  id: res.memory.id,
+                  ok: true,
                   path: res.memory.path,
-                  message: "Stored (existing content & similar candidates redacted by read ACL).",
+                  message: "Stored (existing content & dedup details redacted by read ACL).",
                 },
                 null,
                 2,
@@ -1106,12 +1132,12 @@ export function createBrainServer(options: BrainServerOptions = {}): McpServer {
           ...args,
           project: canonicalProject,
         });
-        const hits = policy
-          ? result.hits.filter((h) => {
-              const inf = inferNoteScopeAndProject(h.path);
-              return canReadTarget(policy, inf.scope, inf.project);
-            })
-          : result.hits;
+        const hits: typeof result.hits = [];
+        for (const h of result.hits) {
+          if (await canReadRealNotePath(vault, policy, h.path)) {
+            hits.push(h);
+          }
+        }
         if (!hits.length) {
           return {
             result: textResult(`${result.mode}: ${result.message}`),
@@ -1277,12 +1303,12 @@ export function createBrainServer(options: BrainServerOptions = {}): McpServer {
         if (!result.actionId) {
           return { result: textResult(result.message), resultCount: 0 };
         }
-        const allowedPointers = policy
-          ? result.pointers.filter((p) => {
-              const inf = inferNoteScopeAndProject(p.path);
-              return canReadTarget(policy, inf.scope, inf.project);
-            })
-          : result.pointers;
+        const allowedPointers: typeof result.pointers = [];
+        for (const p of result.pointers) {
+          if (await canReadRealNotePath(vault, policy, p.path)) {
+            allowedPointers.push(p);
+          }
+        }
         const header = [
           `action: ${result.actionId}`,
           result.description ? `description: ${result.description}` : null,

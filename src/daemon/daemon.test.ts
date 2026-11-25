@@ -574,11 +574,15 @@ describe("local HTTP daemon, Streamable HTTP MCP, ACLs, access log & dashboard",
       join(vault, "stack/recent.md"),
       "# Recent\n\n- 2026-11-25 **ToolA** — used in projects/api/tools.md\n- 2026-11-25 **ToolB** — used in projects/api-secrets/tools.md\n",
     );
-    // Minor #11: symlink inside global folder pointing into restricted project
+    // Minor #11: symlinks inside global AND allowed project pointing into restricted project
     await writeText(join(vault, "inbox/placeholder.md"), "# Placeholder\n");
     await symlink(
       join(vault, "projects/api-secrets/README.md"),
       join(vault, "inbox/sneaky-link.md"),
+    );
+    await symlink(
+      join(vault, "projects/api-secrets/README.md"),
+      join(vault, "projects/api/link-to-secret.md"),
     );
 
     const daemon = await startBrainDaemon({
@@ -700,7 +704,7 @@ describe("local HTTP daemon, Streamable HTTP MCP, ACLs, access log & dashboard",
         }),
       );
 
-      // B1: get_project_context on "api" must NOT leak api-secrets, rapid, or global-tagged note
+      // B1 + Minor #3 + Minor #11: get_project_context on "api" must NOT leak api-secrets (direct or via symlink), rapid, global-tagged note, or vault path
       const ctxRes = await apiClient.callTool({
         name: "get_project_context",
         arguments: { project: "api" },
@@ -711,6 +715,25 @@ describe("local HTTP daemon, Streamable HTTP MCP, ACLs, access log & dashboard",
       assert.ok(!ctxText.includes("Top secret sibling."));
       assert.ok(!ctxText.includes("Substring collision."));
       assert.ok(!ctxText.includes("Global body must not leak."));
+      assert.ok(!ctxText.includes(vault), "restricted app must not see absolute vault path in get_project_context");
+
+      // Minor #3 + #11: search_notes must NOT leak symlinked secret project content or absolute vault path
+      const symSearch = await apiClient.callTool({
+        name: "search_notes",
+        arguments: { query: "Top secret sibling", mode: "fts" },
+      });
+      assert.ok(!symSearch.isError);
+      const symSearchText = textOf(symSearch);
+      assert.ok(!symSearchText.includes("Top secret sibling."));
+      assert.ok(!symSearchText.includes(vault));
+
+      const allowedSearch = await apiClient.callTool({
+        name: "search_notes",
+        arguments: { query: "Core API repo", mode: "fts" },
+      });
+      assert.ok(!allowedSearch.isError);
+      assert.ok(textOf(allowedSearch).includes("projects/api/README.md"));
+      assert.ok(!textOf(allowedSearch).includes(vault), "restricted app must not see absolute vault path in search_notes");
 
       // Minor #3: vault_info hides absolute path & global noteCount for restricted app
       const infoRes = await apiClient.callTool({ name: "vault_info", arguments: {} });

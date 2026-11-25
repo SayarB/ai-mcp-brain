@@ -259,7 +259,7 @@ export async function startBrainDaemon(
 ): Promise<BrainDaemonHandle> {
   const loadedConfig = options.vaultPath && options.daemonConfig !== undefined
     ? null
-    : await loadConfig();
+    : await loadConfig({ strictDaemon: true });
 
   const daemonCfg: DaemonConfig = {
     ...(loadedConfig?.daemon ?? {}),
@@ -1131,6 +1131,10 @@ export async function startBrainDaemon(
     console.error(`[brain-daemon] Vault:        ${vaultPath}`);
     if (authToken) {
       console.error(`[brain-daemon] Auth:         Bearer token enabled`);
+    } else if (appTokens.size > 0) {
+      console.error(
+        `[brain-daemon] WARNING: per-app tokens configured without an admin token; /api/* dashboard endpoints require BRAIN_DAEMON_TOKEN`,
+      );
     }
   }
 

@@ -29,7 +29,7 @@ vault_path = "~/Obsidian/My Brain"
 # default_mode = "read-write"     # read-write | read-only | disabled
 # auth_token_env = "BRAIN_DAEMON_TOKEN"
 # allow_remote = false            # requires an auth token when true
-# allowed_origins = []            # extra browser Origins allowed when allow_remote = true
+# allowed_origins = []            # extra browser Origins allowed on /mcp and /api/*
 #
 # Per-harness ACL defaults (also editable live at http://127.0.0.1:4190/ or via `brain acl`):
 # [apps.claude]

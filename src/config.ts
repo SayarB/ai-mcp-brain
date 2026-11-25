@@ -180,7 +180,9 @@ export function extractTomlTables(raw: string, prefixes: string[]): string {
   return blocks.join("\n\n");
 }
 
-export async function loadConfig(): Promise<BrainConfig> {
+export async function loadConfig(opts?: {
+  strictDaemon?: boolean;
+}): Promise<BrainConfig> {
   const defaults: BrainConfig = {
     vault_path: DEFAULTS.vault_path,
     inject: platformInjectDefaults(),
@@ -212,8 +214,33 @@ export async function loadConfig(): Promise<BrainConfig> {
       }
     : undefined;
 
-  const daemon = parsed.daemon !== undefined ? parseDaemonConfig(parsed.daemon) : undefined;
-  const apps = parsed.apps !== undefined ? parseAppsConfig(parsed.apps) : undefined;
+  let daemon: DaemonConfig | undefined;
+  if (parsed.daemon !== undefined) {
+    try {
+      daemon = parseDaemonConfig(parsed.daemon);
+    } catch (err) {
+      if (opts?.strictDaemon) throw err;
+      console.error(
+        `[ai-mcp-brain] WARNING: ignoring malformed [daemon] config: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+  }
+
+  let apps: Record<string, AppConfigEntry> | undefined;
+  if (parsed.apps !== undefined) {
+    try {
+      apps = parseAppsConfig(parsed.apps);
+    } catch (err) {
+      if (opts?.strictDaemon) throw err;
+      console.error(
+        `[ai-mcp-brain] WARNING: ignoring malformed [apps] config: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+  }
 
   return {
     vault_path: parsed.vault_path ?? defaults.vault_path,
