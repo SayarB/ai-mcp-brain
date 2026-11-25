@@ -22,14 +22,20 @@ Diagnostics: resolved vault path, whether readable, note count, `AGENTS.md` pres
 
 ### `search_notes`
 
-Full-text keyword search across the vault. Ranked paths, titles, snippets.
+Hybrid semantic + full-text search across the vault using a disposable local SQLite index (`FTS5 BM25` + local ONNX embeddings via `Xenova/bge-small-en-v1.5` + `[[wikilink]]` 1-hop graph context), fused via Reciprocal Rank Fusion (RRF). Set `BRAIN_EMBED=off` to run FTS5-only.
 
 | Param | Required | Notes |
 |-------|----------|--------|
-| `query` | yes | Keywords |
+| `query` | yes | Keywords or natural language |
 | `limit` | no | 1–50, default 10 |
+| `mode` | no | `hybrid` (default) \| `fts` \| `vector` |
+| `project` | no | Filter to a git repo slug |
+| `scope` | no | `global` \| `project` |
+| `type` | no | `project`, `pattern`, `stack`, `instruction`, `suggestion`, `workflow`, `inbox`, … |
+| `tags` | no | `string[]` — note must match all given tags |
+| `updated_after` | no | `YYYY-MM-DD` recency filter |
 
-**Not** semantic/embedding search. All terms must appear.
+Incremental sync runs automatically before search (skips unchanged files by `mtime` + `sha256`). If local embeddings are unavailable offline, search degrades gracefully to FTS5.
 
 ### `read_note`
 

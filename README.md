@@ -92,7 +92,7 @@ My Brain/
 
 | Tool | Purpose |
 |------|---------|
-| `search_notes` | Keyword search |
+| `search_notes` | Hybrid semantic + FTS5 search (with filters + 1-hop links) |
 | `read_note` | Read by relative path |
 | `remember` | Write note (`scope`: `global` \| `project`) |
 | `get_project_context` | Ensure + load a git-repo project pack |

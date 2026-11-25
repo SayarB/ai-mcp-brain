@@ -10,7 +10,7 @@ Use it when work should survive chat sessions — decisions, gotchas, project co
 
 On install, `templates/vault/` is copied into your chosen vault path (idempotent: existing notes are not overwritten). The MCP server resolves the vault via `BRAIN_VAULT` / `config.toml` and only reads or writes paths inside that root.
 
-Search is **keyword full-text** (not embeddings). Project packs are created from `projects/_template/` on first `get_project_context` or project-scoped `remember`.
+Search uses a **disposable local SQLite hybrid index** (`FTS5 BM25` with Porter stemming + local ONNX embeddings + `[[wikilink]]` 1-hop graph links), stored outside the vault in `~/.cache/ai-mcp-brain/` and incrementally synced by `mtime` + `sha256`. Markdown remains the sole source of truth — deleting the cache rebuilds it cleanly (or run `npm run brain -- reindex --force`). Set `BRAIN_EMBED=off` for FTS5-only mode. Project packs are created from `projects/_template/` on first `get_project_context` or project-scoped `remember`.
 
 Memory policy (injected into harnesses) tells agents to:
 
@@ -22,7 +22,7 @@ Memory policy (injected into harnesses) tells agents to:
 
 - Durable Obsidian-ready vault shared by humans and agents  
 - Project packs keyed to one git repository each  
-- Keyword search with ranked paths, titles, snippets  
+- Hybrid semantic + FTS5 search with ranked paths, headings, snippets, filters, and 1-hop wikilinks  
 - Read a note by relative path  
 - Append durable notes globally or into a project pack  
 - Load project context in one call  
@@ -66,7 +66,7 @@ Agent asks if scope is unclear, then `remember` with `scope=project`, `project=<
 - Prefer a normal home path for the vault; iCloud / sandboxed cloud folders can yield `EPERM`  
 - Project ≠ company or product brand — one folder per **git repo**  
 - `_meta/projects-index.md` is a manual agent convention today; MCP does not auto-apply it  
-- Search requires all query terms to appear; skip `.obsidian`, `.git`, `node_modules`, `_template`  
+- Hybrid search skips `.obsidian`, `.git`, `node_modules`, `_template`; supports filters (`project`, `scope`, `type`, `tags`, `updated_after`) and `mode=hybrid|fts|vector`  
 - Prefer append / update over duplicate notes  
 - Soft prefs and binding process use the [guidance system](guidance.md), not `remember`  
 

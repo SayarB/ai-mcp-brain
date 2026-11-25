@@ -12,6 +12,12 @@ import { loadEnvFile } from "../env.ts";
 import { JiraNotConfiguredError } from "../jira/client.ts";
 import { join } from "node:path";
 import {
+  searchHybrid,
+  syncVaultIndex,
+  type HybridSearchOptions,
+  type SearchMode,
+} from "../index/index.ts";
+import {
   getProjectContext,
   listGuidance,
   listRecent,
@@ -78,9 +84,9 @@ export function createBrainServer(): McpServer {
     {
       title: "Search notes",
       description:
-        "Full-text search across the Obsidian second-brain vault. Returns ranked paths, titles, and snippets.",
+        "Hybrid semantic + full-text (FTS5 BM25 + local embeddings + wikilink graph) search across the Obsidian second-brain vault. Supports optional filters by project, scope, type, tags, and updated_after.",
       inputSchema: {
-        query: z.string().min(1).describe("Search query (keywords)"),
+        query: z.string().min(1).describe("Search query (keywords or natural language)"),
         limit: z
           .number()
           .int()
@@ -88,22 +94,96 @@ export function createBrainServer(): McpServer {
           .max(50)
           .optional()
           .describe("Max results (default 10)"),
+        mode: z
+          .enum(["hybrid", "fts", "vector"])
+          .optional()
+          .describe("Retrieval mode: hybrid (default), fts (BM25 only), or vector (semantic only)"),
+        project: z
+          .string()
+          .optional()
+          .describe("Filter to a specific git repo slug"),
+        scope: z
+          .enum(["global", "project"])
+          .optional()
+          .describe("Filter by global or project scope"),
+        type: z
+          .string()
+          .optional()
+          .describe("Filter by note type (project, pattern, stack, instruction, suggestion, workflow, inbox, …)"),
+        tags: z
+          .array(z.string())
+          .optional()
+          .describe("Filter to notes matching all given tags"),
+        updated_after: z
+          .string()
+          .optional()
+          .describe("Filter to notes updated on or after YYYY-MM-DD"),
       },
     },
-    async ({ query, limit }) => {
+    async ({ query, limit, mode, project, scope, type, tags, updated_after }) => {
       try {
         const vault = await resolveVault();
-        const hits = await searchNotes(vault, query, limit ?? 10);
-        if (!hits.length) {
-          return textResult(`No notes matched: ${query}`);
+        const opts: HybridSearchOptions = {
+          limit: limit ?? 10,
+          mode: mode as SearchMode | undefined,
+          project,
+          scope,
+          type,
+          tags,
+          updatedAfter: updated_after,
+        };
+        try {
+          const result = await searchHybrid(vault, query, opts);
+          if (!result.hits.length) {
+            return textResult(`No notes matched: ${query} (mode=${result.modeUsed})`);
+          }
+          const body = result.hits
+            .map((h, i) => {
+              const metaBits = [
+                h.type ? `type=${h.type}` : null,
+                h.project ? `project=${h.project}` : h.scope ? `scope=${h.scope}` : null,
+                h.updated ? `updated=${h.updated}` : null,
+                `via=${h.matchedBy.join("+")}`,
+                h.vectorScore !== null ? `sim=${h.vectorScore}` : null,
+              ]
+                .filter(Boolean)
+                .join(", ");
+              const label =
+                h.heading && h.heading !== h.title
+                  ? h.heading.startsWith(h.title)
+                    ? h.heading
+                    : `${h.title} — ${h.heading}`
+                  : h.title;
+              const linksLine = h.relatedLinks.length
+                ? `\n   links: ${h.relatedLinks.join(", ")}`
+                : "";
+              return `${i + 1}. ${h.path} (${label}) [score=${h.score}; ${metaBits}]\n   ${h.snippet}${linksLine}`;
+            })
+            .join("\n\n");
+          const warn = result.embedWarning
+            ? `\nNote: embeddings unavailable (${result.embedWarning}); used FTS5.`
+            : "";
+          return textResult(
+            `Vault: ${vault} (mode=${result.modeUsed}, ${result.searchMs}ms)${warn}\n\n${body}`,
+          );
+        } catch (indexErr) {
+          console.error(
+            `[ai-mcp-brain] hybrid index failed, falling back to legacy search: ${
+              indexErr instanceof Error ? indexErr.message : String(indexErr)
+            }`,
+          );
+          const hits = await searchNotes(vault, query, limit ?? 10);
+          if (!hits.length) {
+            return textResult(`No notes matched: ${query}`);
+          }
+          const body = hits
+            .map(
+              (h, i) =>
+                `${i + 1}. ${h.path} (${h.title}) [score=${h.score}]\n   ${h.snippet}`,
+            )
+            .join("\n\n");
+          return textResult(`Vault: ${vault} (legacy fallback)\n\n${body}`);
         }
-        const body = hits
-          .map(
-            (h, i) =>
-              `${i + 1}. ${h.path} (${h.title}) [score=${h.score}]\n   ${h.snippet}`,
-          )
-          .join("\n\n");
-        return textResult(`Vault: ${vault}\n\n${body}`);
       } catch (err) {
         return errorResult(err);
       }
@@ -726,6 +806,23 @@ async function main(): Promise<void> {
   const server = createBrainServer();
   const transport = new StdioServerTransport();
   await server.connect(transport);
+
+  // Non-blocking background index warm-up so the first search_notes call is fast
+  if (info.readable && process.env.BRAIN_MCP_WARMUP !== "0") {
+    void syncVaultIndex(vault)
+      .then((stats) => {
+        console.error(
+          `[ai-mcp-brain] index ready (${stats.chunksIndexed} chunks, ${stats.durationMs}ms, model=${stats.embedModel ?? "fts-only"})`,
+        );
+      })
+      .catch((err) => {
+        console.error(
+          `[ai-mcp-brain] background index warm-up skipped: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      });
+  }
 }
 
 import { isMainModule } from "../runtime.ts";
