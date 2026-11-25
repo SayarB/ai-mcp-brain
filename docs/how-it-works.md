@@ -31,7 +31,7 @@ Memory for application work is keyed to **git repos**, not product brands or mon
 
 - Folder: `projects/<slug>/`
 - Default slug: git root folder name
-- Optional overrides: documented in `_meta/projects-index.md` (agents should read and apply; MCP does not auto-resolve the index yet)
+- Optional overrides: documented in `_meta/projects-index.md` (auto-resolved by MCP on `get_project_context`, `remember`, `track_tool`, `upsert_guidance`, and atomic memory tools)
 
 Each project pack includes at least:
 

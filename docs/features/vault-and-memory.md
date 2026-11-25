@@ -65,7 +65,8 @@ Agent asks if scope is unclear, then `remember` with `scope=project`, `project=<
 
 - Prefer a normal home path for the vault; iCloud / sandboxed cloud folders can yield `EPERM`  
 - Project ≠ company or product brand — one folder per **git repo**  
-- `_meta/projects-index.md` is a manual agent convention today; MCP does not auto-apply it  
+- `_meta/projects-index.md` is auto-resolved by MCP for paths and remote URLs
+- Write-time secret guard blocks private keys, API tokens, JWTs, and credentialed URLs across `remember`, `upsert_guidance`, `track_tool`, and `*_memory` tools  
 - Hybrid search skips `.obsidian`, `.git`, `node_modules`, `_template`; supports filters (`project`, `scope`, `type`, `tags`, `updated_after`) and `mode=hybrid|fts|vector`  
 - Prefer append / update over duplicate notes  
 - Soft prefs and binding process use the [guidance system](guidance.md), not `remember`  

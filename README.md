@@ -81,6 +81,7 @@ My Brain/
     catalog/          # one note per tool/SaaS
     recent.md         # newest-first skills/tools log
   media/              # short talk takeaways
+  memories/           # atomic ID-tracked memories (by category)
   agents/             # orchestrator / agent learnings
   _meta/              # schema, projects-index
   AGENTS.md
@@ -93,9 +94,15 @@ My Brain/
 | Tool | Purpose |
 |------|---------|
 | `search_notes` | Hybrid semantic + FTS5 search (with filters + 1-hop links) |
-| `read_note` | Read by relative path |
-| `remember` | Write note (`scope`: `global` \| `project`) |
-| `get_project_context` | Ensure + load a git-repo project pack |
+| `read_note` | Read by relative path (supports `section`, `tail`, `max_chars`) |
+| `remember` | Write note (`scope`: `global` \| `project`; secret-guarded) |
+| `add_memory` | Store atomic ID-tracked memory with dedup + secret guard |
+| `search_memory` | Hybrid search over atomic memories (`status=active` default) |
+| `list_memories` | List atomic memories by scope/project/category/app/status |
+| `update_memory` | Surgically edit an atomic memory by ID |
+| `supersede_memory` | Replace outdated memory while keeping temporal history |
+| `delete_memory` | Permanently remove an atomic memory by ID |
+| `get_project_context` | Ensure + load a git-repo project pack (resolves `projects-index.md`) |
 | `list_recent` | Recent tools/skills |
 | `track_tool` | Catalog SaaS/tool + prepend recent |
 | `vault_info` | Diagnostics: path, readable?, note count |

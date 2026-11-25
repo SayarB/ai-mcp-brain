@@ -44,8 +44,55 @@ Read one note by relative vault path.
 | Param | Required | Notes |
 |-------|----------|--------|
 | `path` | yes | e.g. `projects/my-repo/decisions.md` |
+| `section` | no | Heading text to extract only that section |
+| `tail` | no | If true and note exceeds `max_chars`, keep header + newest tail |
+| `max_chars` | no | 200–100000, default 16000 |
 
 Absolute paths and `../` escapes are blocked.
+
+### `add_memory`
+
+Store an atomic, ID-tracked memory in Markdown (`memories/<category>.md` or `projects/<slug>/memories.md`) with write-time secret scanning and automatic semantic/lexical deduplication.
+
+| Param | Required | Notes |
+|-------|----------|--------|
+| `title` | yes | Concise memory title |
+| `content` | yes | Factual body (secret-guarded) |
+| `scope` | no | `global` \| `project` (defaults to `project` when `project` is set) |
+| `project` | if project | Git repo slug, path, or remote URL (auto-resolved via `_meta/projects-index.md`) |
+| `category` | no | `profile` \| `preferences` \| `decisions` \| `facts` \| `gotchas` |
+| `app` | no | Source harness (`cursor`, `claude`, `codex`, `zed`, …) |
+| `tags` | no | `string[]` |
+| `supersede_id` | no | Existing memory ID to atomically supersede |
+| `dedupe` | no | `dedupe` (default: skip near-exact dupes & surface conflicts) \| `force` |
+
+### `search_memory`
+
+Hybrid semantic + lexical search over atomic memories. Defaults to `status=active` so superseded facts never pollute active recall.
+
+| Param | Required | Notes |
+|-------|----------|--------|
+| `query` | yes | Search query |
+| `limit` | no | 1–50, default 10 |
+| `mode` | no | `hybrid` (default) \| `fts` \| `vector` |
+| `scope`, `project`, `category`, `app`, `tags` | no | Optional filters |
+| `status` | no | `active` (default) \| `superseded` \| `all` |
+
+### `list_memories`
+
+List atomic memories filtered by `scope`, `project`, `category`, `app`, `tags`, `status` (default `active`), and `limit` (default 30).
+
+### `update_memory`
+
+Surgically edit an atomic memory by `id` (`title`, `content`, `tags`, `category`, `app`). Preserves ID and `created`, bumps `updated`, runs secret guard.
+
+### `supersede_memory`
+
+Replace an outdated memory (`old_id`) with a new active memory (`content`, optional `title`/`tags`/`category`/`app`). Marks the old entry `status=superseded` in Markdown with `superseded_by` lineage.
+
+### `delete_memory`
+
+Permanently delete an atomic memory block by `id` from its Markdown file.
 
 ### `remember`
 

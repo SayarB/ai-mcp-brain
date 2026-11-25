@@ -1,0 +1,38 @@
+export {
+  assertNoSecrets,
+  scanForSecrets,
+  SecretDetectedError,
+  type SecretFinding,
+} from "./guard.ts";
+export {
+  addMemoryRaw,
+  deleteMemory,
+  findMemoryById,
+  generateMemoryId,
+  listMemories,
+  listMemoryFiles,
+  MEMORY_CATEGORIES,
+  memoryTargetPath,
+  parseMemoryFile,
+  renderMemoryBlock,
+  slugifyCategory,
+  supersedeMemory,
+  updateMemory,
+  type AddMemoryRawInput,
+  type AtomicMemory,
+  type ListMemoriesFilter,
+  type MemoryCategory,
+  type MemoryScope,
+  type MemoryStatus,
+  type UpdateMemoryInput,
+} from "./store.ts";
+export {
+  addMemorySmart,
+  searchMemories,
+  type AddMemorySmartInput,
+  type AddMemorySmartResult,
+  type DedupeMode,
+  type MemorySearchHit,
+  type SearchMemoriesOptions,
+  type SimilarCandidate,
+} from "./extract.ts";

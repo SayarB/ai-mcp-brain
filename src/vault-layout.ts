@@ -10,6 +10,7 @@ export const REQUIRED_VAULT_DIRS = [
   "stack",
   "stack/catalog",
   "media",
+  "memories",
   "agents",
   "instructions",
   "instructions/global",

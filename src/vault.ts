@@ -1,6 +1,7 @@
 import { mkdir } from "node:fs/promises";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { configDir } from "./config.ts";
+import { assertNoSecrets } from "./memory/guard.ts";
 import {
   copyFileEnsured,
   globFiles,
@@ -88,6 +89,71 @@ function stripFrontmatter(body: string): string {
   const end = body.indexOf("\n---", 3);
   if (end === -1) return body;
   return body.slice(end + 4).replace(/^\s+/, "");
+}
+
+/** Update or insert `updated: YYYY-MM-DD` inside YAML frontmatter without disturbing body content. */
+export function bumpFrontmatterUpdated(markdown: string, date: string): string {
+  if (!markdown.startsWith("---")) return markdown;
+  const match = markdown.match(/^(---\r?\n)([\s\S]*?)(\r?\n---(?:\r?\n|$))/);
+  if (!match) return markdown;
+  const open = match[1]!;
+  const fmBody = match[2]!;
+  const close = match[3]!;
+  const rest = markdown.slice(match[0].length);
+
+  if (/^updated\s*:/m.test(fmBody)) {
+    const nextFm = fmBody.replace(/^updated\s*:.*$/m, `updated: ${date}`);
+    return `${open}${nextFm}${close}${rest}`;
+  }
+  return `${open}${fmBody.trimEnd()}\nupdated: ${date}${close}${rest}`;
+}
+
+function normalizeIndexKey(raw: string): string {
+  return raw
+    .trim()
+    .replace(/\\/g, "/")
+    .replace(/\.git$/i, "")
+    .replace(/\/+$/, "")
+    .toLowerCase();
+}
+
+/**
+ * Parse `_meta/projects-index.md` lines of the form `<path-or-remote> → <slug>` (or `->`)
+ * and resolve `input` to its canonical vault project slug. Falls back to `slugify(input)`.
+ */
+export async function resolveProjectSlug(
+  vaultPath: string,
+  input: string,
+): Promise<string> {
+  const trimmed = input.trim();
+  if (!trimmed) return "project";
+  const indexAbs = resolve(vaultPath, "_meta", "projects-index.md");
+  if (await pathExists(indexAbs)) {
+    try {
+      const text = await readText(indexAbs);
+      const needle = normalizeIndexKey(trimmed);
+      const needleBase = normalizeIndexKey(basename(trimmed));
+      let inFence = false;
+      for (const rawLine of text.split(/\r?\n/)) {
+        const line = rawLine.trim();
+        if (/^(`{3,}|~{3,})/.test(line)) {
+          inFence = !inFence;
+          continue;
+        }
+        if (inFence || !line || line.startsWith("#")) continue;
+        const m = line.match(/^(?:-\s+)?(.+?)\s*(?:→|->)\s*([A-Za-z0-9._-]+)\s*$/);
+        if (!m?.[1] || !m[2]) continue;
+        const lhs = normalizeIndexKey(m[1]);
+        const rhs = slugify(m[2]);
+        if (lhs === needle || lhs === needleBase) {
+          return rhs;
+        }
+      }
+    } catch {
+      /* ignore unreadable index */
+    }
+  }
+  return slugify(trimmed);
 }
 
 export function assertInsideVault(vaultPath: string, targetAbs: string): void {
@@ -219,7 +285,8 @@ export async function getProjectContext(
   project: string,
   limit = 20,
 ): Promise<{ notes: VaultNote[]; ensured: string[] }> {
-  const { slug, created } = await ensureProject(vaultPath, project);
+  const canonicalSlug = await resolveProjectSlug(vaultPath, project);
+  const { slug, created } = await ensureProject(vaultPath, canonicalSlug);
   const needle = slug.toLowerCase();
   const paths = await listNotePaths(vaultPath);
   const matched: VaultNote[] = [];
@@ -325,6 +392,7 @@ export async function trackTool(
   vaultPath: string,
   input: TrackToolInput,
 ): Promise<{ catalog: VaultNote; recent: string[] }> {
+  assertNoSecrets(input.name, input.summary);
   const slug = slugify(input.slug ?? input.name);
   const date = new Date().toISOString().slice(0, 10);
   const relPath = toPosix(join("stack", "catalog", `${slug}.md`));
@@ -335,7 +403,10 @@ export async function trackTool(
   const tags = input.tags ?? [];
   if (await pathExists(abs)) {
     const prev = await readText(abs);
-    const appended = `${prev.trimEnd()}\n\n## Update ${date}\n\n${input.summary.trim()}\n`;
+    const appended = bumpFrontmatterUpdated(
+      `${prev.trimEnd()}\n\n## Update ${date}\n\n${input.summary.trim()}\n`,
+      date,
+    );
     await writeText(abs, appended);
   } else {
     const body = [
@@ -360,14 +431,18 @@ export async function trackTool(
   );
 
   if (input.project) {
-    const { slug: projectSlug } = await ensureProject(vaultPath, input.project);
+    const canonicalProject = await resolveProjectSlug(vaultPath, input.project);
+    const { slug: projectSlug } = await ensureProject(vaultPath, canonicalProject);
     const toolsPath = toPosix(join("projects", projectSlug, "tools.md"));
     const toolsAbs = resolve(vaultPath, toolsPath);
     const tip = `- ${date} · [[../../stack/catalog/${slug}|${input.name}]] — ${input.summary.trim().replace(/\s+/g, " ").slice(0, 100)}`;
     if (await pathExists(toolsAbs)) {
       const prev = await readText(toolsAbs);
       if (!prev.toLowerCase().includes(slug.toLowerCase())) {
-        await writeText(toolsAbs, `${prev.trimEnd()}\n${tip}\n`);
+        await writeText(
+          toolsAbs,
+          bumpFrontmatterUpdated(`${prev.trimEnd()}\n${tip}\n`, date),
+        );
       }
     }
   }
@@ -381,6 +456,7 @@ export async function rememberNote(
   vaultPath: string,
   input: RememberInput,
 ): Promise<VaultNote> {
+  assertNoSecrets(input.title, input.content);
   const date = new Date().toISOString().slice(0, 10);
   const tags = input.tags ?? [];
   const scope: RememberScope =
@@ -395,9 +471,12 @@ export async function rememberNote(
   let relPath: string;
   let type: string;
   let scopeField: RememberScope = scope;
+  let resolvedProjectSlug: string | undefined;
 
   if (scope === "project" && input.project) {
-    const { slug } = await ensureProject(vaultPath, input.project);
+    const canonicalProject = await resolveProjectSlug(vaultPath, input.project);
+    const { slug } = await ensureProject(vaultPath, canonicalProject);
+    resolvedProjectSlug = slug;
     const fileStem = slugify(
       input.projectFile ?? input.filename ?? "decisions",
     );
@@ -411,14 +490,17 @@ export async function rememberNote(
     type = "project";
     scopeField = "project";
 
-    // Append to pack file rather than overwrite README seed
+    // Append to pack file rather than overwrite README seed, keeping frontmatter `updated` current
     const absolutePath = resolve(vaultPath, relPath);
     assertInsideVault(vaultPath, absolutePath);
     await mkdir(dirname(absolutePath), { recursive: true });
     if (await pathExists(absolutePath)) {
       const prev = await readText(absolutePath);
       const block = `\n## ${input.title} (${date})\n\n${input.content.trim()}\n`;
-      await writeText(absolutePath, `${prev.trimEnd()}\n${block}`);
+      await writeText(
+        absolutePath,
+        bumpFrontmatterUpdated(`${prev.trimEnd()}\n${block}`, date),
+      );
       return readNote(vaultPath, relPath);
     }
   } else {
@@ -445,7 +527,10 @@ export async function rememberNote(
 
   if (await pathExists(absolutePath)) {
     const prev = await readText(absolutePath);
-    const appended = `${prev.trimEnd()}\n\n## Update ${date}\n\n${input.content.trim()}\n`;
+    const appended = bumpFrontmatterUpdated(
+      `${prev.trimEnd()}\n\n## Update ${date}\n\n${input.content.trim()}\n`,
+      date,
+    );
     await writeText(absolutePath, appended);
     return readNote(vaultPath, relPath);
   }
@@ -454,7 +539,9 @@ export async function rememberNote(
     "---",
     `type: ${type}`,
     `scope: ${scopeField}`,
-    input.project ? `project: ${slugify(input.project)}` : null,
+    resolvedProjectSlug || input.project
+      ? `project: ${resolvedProjectSlug ?? slugify(input.project!)}`
+      : null,
     `tags: [${tags.map((t) => JSON.stringify(t)).join(", ")}]`,
     `updated: ${date}`,
     "---",
@@ -499,12 +586,28 @@ export async function vaultInfo(vaultPath: string): Promise<{
   }
 }
 
-export function noteToSummary(note: VaultNote, maxBody = 2000): string {
+export function noteToSummary(note: VaultNote, maxBody = 16000): string {
   const body =
     note.body.length > maxBody
-      ? `${note.body.slice(0, maxBody)}\n\n…(truncated)`
+      ? `${note.body.slice(0, maxBody)}\n\n…(truncated at ${maxBody} of ${note.body.length} chars; pass section or tail=true to read further)`
       : note.body;
   return `path: ${note.path}\ntitle: ${note.title}\n\n${body}`;
+}
+
+/**
+ * Summarize a note while preserving the newest tail (ideal for append-only files like decisions.md / gotchas.md
+ * so recent entries are never silently clipped off the bottom).
+ */
+export function noteToTailSummary(note: VaultNote, maxBody = 2400): string {
+  if (note.body.length <= maxBody) {
+    return `path: ${note.path}\ntitle: ${note.title}\n\n${note.body}`;
+  }
+  const headBudget = Math.min(350, Math.floor(maxBody * 0.2));
+  const tailBudget = maxBody - headBudget;
+  const head = note.body.slice(0, headBudget).trimEnd();
+  const tail = note.body.slice(-tailBudget).trimStart();
+  const omitted = note.body.length - headBudget - tailBudget;
+  return `path: ${note.path}\ntitle: ${note.title}\n\n${head}\n\n…(${omitted} older chars omitted; use read_note for full file)…\n\n${tail}`;
 }
 
 export type GuidanceType = "instruction" | "suggestion" | "workflow";
@@ -911,6 +1014,7 @@ export async function upsertGuidance(
   vaultPath: string,
   input: UpsertGuidanceInput,
 ): Promise<VaultNote> {
+  assertNoSecrets(input.title, input.content);
   if (input.scope === "project" && !input.project) {
     throw new Error("scope=project requires project (git repo slug)");
   }
@@ -926,14 +1030,18 @@ export async function upsertGuidance(
     );
   }
 
-  if (input.scope === "project" && input.project) {
-    await ensureProject(vaultPath, input.project);
+  const resolvedProject =
+    input.scope === "project" && input.project
+      ? await resolveProjectSlug(vaultPath, input.project)
+      : undefined;
+  if (resolvedProject) {
+    await ensureProject(vaultPath, resolvedProject);
   }
 
   const paths = guidancePaths(
     input.type,
     kindOrId,
-    input.scope === "project" ? input.project : undefined,
+    resolvedProject,
   );
   const relPath =
     input.scope === "project" ? paths.project! : paths.global;
@@ -992,18 +1100,27 @@ export async function upsertGuidance(
     }
     if (writeMode === "replace_section") {
       const prev = await readText(abs);
-      await writeText(abs, applySectionReplace(prev, input.section!, body));
+      await writeText(
+        abs,
+        bumpFrontmatterUpdated(applySectionReplace(prev, input.section!, body), date),
+      );
       return readNote(vaultPath, relPath);
     }
     if (writeMode === "remove_section") {
       const prev = await readText(abs);
-      await writeText(abs, applySectionRemove(prev, input.section!));
+      await writeText(
+        abs,
+        bumpFrontmatterUpdated(applySectionRemove(prev, input.section!), date),
+      );
       return readNote(vaultPath, relPath);
     }
     const prev = await readText(abs);
     await writeText(
       abs,
-      `${prev.trimEnd()}\n\n## Update ${date}\n\n${body}\n`,
+      bumpFrontmatterUpdated(
+        `${prev.trimEnd()}\n\n## Update ${date}\n\n${body}\n`,
+        date,
+      ),
     );
     return readNote(vaultPath, relPath);
   }
