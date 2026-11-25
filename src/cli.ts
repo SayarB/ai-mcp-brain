@@ -1,5 +1,13 @@
 #!/usr/bin/env node
-import { loadConfig, resolveVaultPath } from "./config.ts";
+import { configDir, loadConfig, resolveVaultPath } from "./config.ts";
+import {
+  DaemonStateStore,
+  startBrainDaemon,
+  validateAppName,
+  type AccessMode,
+  type ScopeFilter,
+} from "./daemon/index.ts";
+import { loadEnvFile } from "./env.ts";
 import { searchHybrid, syncVaultIndex, type SearchMode } from "./index/index.ts";
 import { formatInitReport, initVault } from "./init.ts";
 import {
@@ -16,12 +24,14 @@ import {
   formatInjectReport,
   injectHarnesses,
   type InjectTarget,
+  type InjectTransport,
 } from "./inject.ts";
 import {
   injectOrchestoOnly,
   removeOrchestoSkills,
   updateOrchesto,
 } from "./orchesto-skills.ts";
+import { join } from "node:path";
 import { isMainModule, processArgs } from "./runtime.ts";
 import { runSetup } from "./setup.ts";
 import { appendEvent } from "./work/ledger.ts";
@@ -31,6 +41,8 @@ type Command =
   | "setup"
   | "init"
   | "inject"
+  | "daemon"
+  | "acl"
   | "reindex"
   | "search"
   | "memory"
@@ -53,8 +65,12 @@ Primary (use this to install):
 
 Advanced:
   init [--path <dir>]     Vault folders only
-  inject [--target <t>] [--orchesto-only]
+  inject [--target <t>] [--transport stdio|http] [--daemon-url <url>] [--orchesto-only]
                           Harness MCP/rules + Orchesto packs, or packs only
+  daemon [--host 127.0.0.1] [--port 4190] [--vault <dir>] [--no-warmup] [--no-watch]
+                          Run shared Streamable HTTP MCP daemon + local control UI
+  acl <list|set|pause|resume|reset> [app] [options]
+                          Inspect or update per-harness ACL permissions
   orchesto-update         git pull --ff-only this clone, then refresh Orchesto packs
   orchesto-remove         Delete global Orchesto skill dirs (not vault notes)
   reindex [--vault <dir>] [--force] [--no-embed]
@@ -103,7 +119,14 @@ function parseArgs(argv: string[]): {
       target = rest[++i];
       continue;
     }
-    if (arg === "--orchesto-only" || arg === "--force" || arg === "--no-embed") {
+    if (
+      arg === "--orchesto-only" ||
+      arg === "--force" ||
+      arg === "--no-embed" ||
+      arg === "--no-warmup" ||
+      arg === "--no-watch" ||
+      arg === "--allow-remote"
+    ) {
       flags[arg.slice(2)] = "true";
       continue;
     }
@@ -161,10 +184,185 @@ async function cmdInject(
     process.exitCode = 1;
     return;
   }
+  const transportRaw = flags.transport ?? "stdio";
+  if (transportRaw !== "stdio" && transportRaw !== "http") {
+    console.error(`Unknown --transport: ${transportRaw} (expected stdio | http)`);
+    process.exitCode = 1;
+    return;
+  }
   const { vaultPath, actions } = isOrchestoOnly(flags)
     ? await injectOrchestoOnly(target)
-    : await injectHarnesses(target);
+    : await injectHarnesses(target, {
+        transport: transportRaw as InjectTransport,
+        daemonUrl: flags["daemon-url"],
+      });
   console.log(formatInjectReport(vaultPath, actions));
+  if (transportRaw === "http") {
+    const base = (flags["daemon-url"]?.trim() || "http://127.0.0.1:4190").replace(/\/+$/, "");
+    console.log(`[inject] start the daemon: npm run daemon (dashboard: ${base}/)`);
+    console.log(
+      `[inject] Claude Code HTTP MCP: claude mcp add --transport http ai-mcp-brain "${base}/mcp?app=claude"`,
+    );
+  }
+}
+
+async function cmdDaemon(
+  pathOverride: string | undefined,
+  flags: Record<string, string>,
+): Promise<void> {
+  await loadEnvFile(join(configDir(), ".env"));
+  const config = await loadConfig();
+  const vaultPath = resolveVaultPath(config.vault_path, pathOverride);
+  if (pathOverride) {
+    process.env.BRAIN_VAULT = vaultPath;
+  }
+  let port: number | undefined;
+  if (flags.port !== undefined) {
+    const parsed = Number(flags.port);
+    if (!Number.isInteger(parsed) || parsed < 0 || parsed > 65535) {
+      console.error(`Invalid --port: ${flags.port}`);
+      process.exitCode = 1;
+      return;
+    }
+    port = parsed;
+  }
+  const handle = await startBrainDaemon({
+    vaultPath,
+    host: flags.host,
+    port,
+    allowRemote: flags["allow-remote"] === "true",
+    warmup: flags["no-warmup"] !== "true",
+    watchVault: flags["no-watch"] !== "true",
+    daemonConfig: config.daemon,
+    configApps: config.apps,
+  });
+
+  await new Promise<void>((resolveStop) => {
+    const shutdown = () => {
+      console.error("\n[brain-daemon] shutting down...");
+      void handle.close().finally(resolveStop);
+    };
+    process.once("SIGINT", shutdown);
+    process.once("SIGTERM", shutdown);
+  });
+}
+
+function parseScopeListFlag(raw: string | undefined): ScopeFilter[] | undefined {
+  if (raw === undefined) return undefined;
+  const parts = raw
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+  for (const p of parts) {
+    if (p !== "global" && p !== "project") {
+      throw new Error(`Invalid scope "${p}" (expected global | project)`);
+    }
+  }
+  return parts as ScopeFilter[];
+}
+
+async function cmdAcl(
+  positionals: string[],
+  pathOverride: string | undefined,
+  flags: Record<string, string>,
+): Promise<void> {
+  const [sub, appRaw] = positionals;
+  const config = await loadConfig();
+  const vaultPath = resolveVaultPath(config.vault_path, pathOverride);
+  if (pathOverride) {
+    process.env.BRAIN_VAULT = vaultPath;
+  }
+  const store = await DaemonStateStore.open(vaultPath, {
+    daemonConfig: config.daemon,
+    configApps: config.apps,
+  });
+
+  try {
+    switch (sub ?? "list") {
+      case "list": {
+        const apps = store.listApps();
+        console.log(JSON.stringify({ count: apps.length, apps }, null, 2));
+        break;
+      }
+      case "pause": {
+        if (!appRaw) {
+          console.error("Usage: brain acl pause <app>");
+          process.exitCode = 1;
+          return;
+        }
+        const updated = store.upsertAppOverride(validateAppName(appRaw), { enabled: false });
+        console.log(JSON.stringify(updated, null, 2));
+        break;
+      }
+      case "resume": {
+        if (!appRaw) {
+          console.error("Usage: brain acl resume <app>");
+          process.exitCode = 1;
+          return;
+        }
+        const updated = store.upsertAppOverride(validateAppName(appRaw), { enabled: true });
+        console.log(JSON.stringify(updated, null, 2));
+        break;
+      }
+      case "reset": {
+        if (!appRaw) {
+          console.error("Usage: brain acl reset <app>");
+          process.exitCode = 1;
+          return;
+        }
+        const updated = store.resetAppOverride(validateAppName(appRaw));
+        console.log(JSON.stringify(updated, null, 2));
+        break;
+      }
+      case "set": {
+        if (!appRaw) {
+          console.error(
+            "Usage: brain acl set <app> [--mode read-write|read-only|disabled] [--read-scopes global,project] [--write-scopes global,project] [--projects a,b] [--deny-tools a,b]",
+          );
+          process.exitCode = 1;
+          return;
+        }
+        const modeRaw = flags.mode;
+        if (
+          modeRaw !== undefined &&
+          modeRaw !== "read-write" &&
+          modeRaw !== "read-only" &&
+          modeRaw !== "disabled"
+        ) {
+          console.error(`Invalid --mode: ${modeRaw}`);
+          process.exitCode = 1;
+          return;
+        }
+        const updated = store.upsertAppOverride(validateAppName(appRaw), {
+          mode: modeRaw as AccessMode | undefined,
+          enabled: modeRaw ? modeRaw !== "disabled" : undefined,
+          readScopes: parseScopeListFlag(flags["read-scopes"]),
+          writeScopes: parseScopeListFlag(flags["write-scopes"]),
+          allowedProjects:
+            flags.projects !== undefined
+              ? flags.projects
+                  .split(",")
+                  .map((s) => s.trim())
+                  .filter(Boolean)
+              : undefined,
+          deniedTools:
+            flags["deny-tools"] !== undefined
+              ? flags["deny-tools"]
+                  .split(",")
+                  .map((s) => s.trim())
+                  .filter(Boolean)
+              : undefined,
+        });
+        console.log(JSON.stringify(updated, null, 2));
+        break;
+      }
+      default:
+        console.error("Usage: brain acl <list|set|pause|resume|reset> [app] [options]");
+        process.exitCode = 1;
+    }
+  } finally {
+    store.close();
+  }
 }
 
 async function cmdOrchestoUpdate(targetRaw = "all"): Promise<void> {
@@ -509,6 +707,12 @@ async function main(): Promise<void> {
       break;
     case "inject":
       await cmdInject(target ?? "all", flags);
+      break;
+    case "daemon":
+      await cmdDaemon(path, flags);
+      break;
+    case "acl":
+      await cmdAcl(positionals, path, flags);
       break;
     case "reindex":
       await cmdReindex(path, flags);

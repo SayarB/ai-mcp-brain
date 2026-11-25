@@ -1,25 +1,40 @@
 #!/usr/bin/env node
 /**
- * Second-brain MCP server (stdio).
- * Logs go to stderr only — stdout is reserved for MCP JSON-RPC.
+ * Second-brain MCP server (stdio & shared tool registry for Streamable HTTP daemon).
+ * Logs go to stderr only — stdout is reserved for MCP JSON-RPC in stdio mode.
  */
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { join } from "node:path";
 import { z } from "zod";
 import { listActions, resolveAction } from "../actions.ts";
 import { configDir, loadConfig, resolveVaultPath } from "../config.ts";
+import {
+  AclDeniedError,
+  assertScopeAccess,
+  canReadTarget,
+  canWriteTarget,
+  checkToolAccess,
+  classifyToolOperation,
+  inferNoteScopeAndProject,
+  normalizeAppNameOrDefault,
+  summarizeToolCall,
+  type AppPolicy,
+} from "../daemon/acl.ts";
+import type { AccessLogEntry, DaemonStateStore } from "../daemon/state.ts";
 import { loadEnvFile } from "../env.ts";
-import { JiraNotConfiguredError } from "../jira/client.ts";
-import { join } from "node:path";
 import {
   searchHybrid,
   syncVaultIndex,
+  type Embedder,
   type HybridSearchOptions,
   type SearchMode,
 } from "../index/index.ts";
+import { JiraNotConfiguredError } from "../jira/client.ts";
 import {
   addMemorySmart,
   deleteMemory,
+  findMemoryById,
   listMemories,
   MEMORY_CATEGORIES,
   searchMemories,
@@ -27,6 +42,7 @@ import {
   updateMemory,
   type MemoryCategory,
 } from "../memory/index.ts";
+import { isMainModule } from "../runtime.ts";
 import {
   findMarkdownSection,
   getProjectContext,
@@ -37,6 +53,7 @@ import {
   readNote,
   rememberNote,
   resolveGuidance,
+  resolveProjectSlug,
   searchNotes,
   trackTool,
   upsertGuidance,
@@ -50,11 +67,38 @@ import {
   toolWorkToday,
 } from "../work/tools.ts";
 
-function textResult(text: string) {
+export type BrainServerOptions = {
+  /** Override vault path (defaults to config.toml / BRAIN_VAULT). */
+  vaultPath?: string;
+  /** Override SQLite hybrid index path (useful in tests & daemon). */
+  indexDbPath?: string;
+  /** Override embedder (e.g. mock or null in tests). */
+  embedder?: Embedder | null;
+  /** Harness/client identifier (e.g. cursor, claude, codex, zed). */
+  app?: string;
+  /** When true (HTTP daemon mode), stamp memory provenance with the authenticated app. */
+  lockAppProvenance?: boolean;
+  /** Optional persistent daemon state store enabling live per-app ACLs and access_log. */
+  stateStore?: DaemonStateStore;
+  /** Optional hook notified whenever a tool call is logged. */
+  onAccessEvent?: (entry: AccessLogEntry) => void;
+};
+
+type ToolTextResult = {
+  content: { type: "text"; text: string }[];
+  isError?: true;
+};
+
+type GuardedOutcome = {
+  result: ToolTextResult;
+  resultCount?: number | null;
+};
+
+function textResult(text: string): ToolTextResult {
   return { content: [{ type: "text" as const, text }] };
 }
 
-function errorResult(err: unknown) {
+function errorResult(err: unknown): ToolTextResult {
   const message = err instanceof Error ? err.message : String(err);
   return {
     content: [{ type: "text" as const, text: `Error: ${message}` }],
@@ -62,16 +106,93 @@ function errorResult(err: unknown) {
   };
 }
 
-async function resolveVault(): Promise<string> {
-  const config = await loadConfig();
-  return resolveVaultPath(config.vault_path);
+function hasReadRestriction(policy: AppPolicy | null): boolean {
+  if (!policy) return false;
+  return (
+    policy.allowedProjects.length > 0 ||
+    !policy.readScopes.includes("global") ||
+    !policy.readScopes.includes("project")
+  );
 }
 
-export function createBrainServer(): McpServer {
+export function createBrainServer(options: BrainServerOptions = {}): McpServer {
   const server = new McpServer({
     name: "ai-mcp-brain",
-    version: "0.2.0",
+    version: "0.3.0",
   });
+
+  const configuredApp = normalizeAppNameOrDefault(
+    options.app ?? process.env.BRAIN_APP,
+    "anonymous",
+  );
+  const stateStore = options.stateStore;
+  const lockAppProvenance = Boolean(options.lockAppProvenance);
+
+  async function resolveVault(): Promise<string> {
+    if (options.vaultPath) return options.vaultPath;
+    const config = await loadConfig();
+    return resolveVaultPath(config.vault_path);
+  }
+
+  function resolveMemoryApp(argApp?: string): string | undefined {
+    if (lockAppProvenance && configuredApp !== "anonymous") {
+      return configuredApp;
+    }
+    if (argApp?.trim()) return argApp.trim();
+    return configuredApp !== "anonymous" ? configuredApp : undefined;
+  }
+
+  async function runGuarded(
+    tool: string,
+    args: Record<string, unknown> | undefined,
+    fn: (ctx: { vault: string; policy: AppPolicy | null }) => Promise<GuardedOutcome>,
+  ): Promise<ToolTextResult> {
+    const started = Date.now();
+    const operation = classifyToolOperation(tool, args);
+    const summary = summarizeToolCall(tool, args);
+
+    const emitLog = (
+      status: "ok" | "denied" | "error",
+      resultCount: number | null,
+      detailSummary?: string,
+    ) => {
+      if (!stateStore) return;
+      try {
+        const entry = stateStore.recordAccess({
+          app: configuredApp,
+          tool,
+          operation,
+          status,
+          summary: detailSummary ?? summary,
+          resultCount,
+          durationMs: Date.now() - started,
+        });
+        options.onAccessEvent?.(entry);
+      } catch {
+        // Logging must never crash tool execution
+      }
+    };
+
+    try {
+      const policy = stateStore ? stateStore.getEffectivePolicy(configuredApp) : null;
+      if (policy) {
+        checkToolAccess(policy, tool, operation);
+      }
+      const vault = await resolveVault();
+      const outcome = await fn({ vault, policy });
+      const status = outcome.result.isError ? "error" : "ok";
+      emitLog(status, outcome.resultCount ?? null);
+      return outcome.result;
+    } catch (err) {
+      if (err instanceof AclDeniedError) {
+        emitLog("denied", 0, `${summary} — ${err.reason}`);
+      } else {
+        const msg = err instanceof Error ? err.message : String(err);
+        emitLog("error", 0, `${summary} — ${msg}`);
+      }
+      return errorResult(err);
+    }
+  }
 
   server.registerTool(
     "vault_info",
@@ -80,15 +201,14 @@ export function createBrainServer(): McpServer {
       description:
         "Diagnostics: resolved vault path, whether it is readable, and note count. Use when vault access seems broken.",
     },
-    async () => {
-      try {
-        const vault = await resolveVault();
+    async () =>
+      runGuarded("vault_info", undefined, async ({ vault }) => {
         const info = await vaultInfo(vault);
-        return textResult(JSON.stringify(info, null, 2));
-      } catch (err) {
-        return errorResult(err);
-      }
-    },
+        return {
+          result: textResult(JSON.stringify(info, null, 2)),
+          resultCount: info.noteCount,
+        };
+      }),
   );
 
   server.registerTool(
@@ -132,24 +252,83 @@ export function createBrainServer(): McpServer {
           .describe("Filter to notes updated on or after YYYY-MM-DD"),
       },
     },
-    async ({ query, limit, mode, project, scope, type, tags, updated_after }) => {
-      try {
-        const vault = await resolveVault();
+    async (args) =>
+      runGuarded("search_notes", args, async ({ vault, policy }) => {
+        const { query, limit, mode, project, scope, type, tags, updated_after } = args;
+        const canonicalProject = project ? await resolveProjectSlug(vault, project) : undefined;
+        if (policy) {
+          if (canonicalProject) {
+            assertScopeAccess(policy, "search_notes", "read", "project", canonicalProject);
+          } else if (scope) {
+            if (!policy.readScopes.includes(scope)) {
+              throw new AclDeniedError(
+                policy.app,
+                "search_notes",
+                `read access to ${scope} scope is not permitted`,
+              );
+            }
+          }
+        }
+
+        const effectiveScope: "global" | "project" | undefined =
+          scope ??
+          (policy && policy.readScopes.length === 1 ? policy.readScopes[0] : undefined);
+        const effectiveProject =
+          canonicalProject ??
+          (policy &&
+          !policy.readScopes.includes("global") &&
+          policy.allowedProjects.length === 1
+            ? policy.allowedProjects[0]
+            : undefined);
+
+        const requestedLimit = limit ?? 10;
+        const fetchLimit = hasReadRestriction(policy)
+          ? Math.min(100, requestedLimit * 4)
+          : requestedLimit;
+
         const opts: HybridSearchOptions = {
-          limit: limit ?? 10,
+          limit: fetchLimit,
           mode: mode as SearchMode | undefined,
-          project,
-          scope,
+          project: effectiveProject,
+          scope: effectiveScope,
           type,
           tags,
           updatedAfter: updated_after,
+          dbPath: options.indexDbPath,
+          embedder: options.embedder,
         };
+
         try {
           const result = await searchHybrid(vault, query, opts);
-          if (!result.hits.length) {
-            return textResult(`No notes matched: ${query} (mode=${result.modeUsed})`);
+          const filteredHits = policy
+            ? result.hits
+                .filter((h) => {
+                  const inferred = inferNoteScopeAndProject(h.path);
+                  const pathAllowed = canReadTarget(policy, inferred.scope, inferred.project);
+                  const metaAllowed = h.project
+                    ? canReadTarget(policy, "project", h.project)
+                    : h.scope === "global" || h.scope === "project"
+                      ? canReadTarget(policy, h.scope, h.project)
+                      : true;
+                  return pathAllowed && metaAllowed;
+                })
+                .map((h) => ({
+                  ...h,
+                  relatedLinks: h.relatedLinks.filter((lnk) => {
+                    const inf = inferNoteScopeAndProject(lnk);
+                    return canReadTarget(policy, inf.scope, inf.project);
+                  }),
+                }))
+                .slice(0, requestedLimit)
+            : result.hits.slice(0, requestedLimit);
+
+          if (!filteredHits.length) {
+            return {
+              result: textResult(`No notes matched: ${query} (mode=${result.modeUsed})`),
+              resultCount: 0,
+            };
           }
-          const body = result.hits
+          const body = filteredHits
             .map((h, i) => {
               const metaBits = [
                 h.type ? `type=${h.type}` : null,
@@ -175,18 +354,29 @@ export function createBrainServer(): McpServer {
           const warn = result.embedWarning
             ? `\nNote: embeddings unavailable (${result.embedWarning}); used FTS5.`
             : "";
-          return textResult(
-            `Vault: ${vault} (mode=${result.modeUsed}, ${result.searchMs}ms)${warn}\n\n${body}`,
-          );
+          return {
+            result: textResult(
+              `Vault: ${vault} (mode=${result.modeUsed}, ${result.searchMs}ms)${warn}\n\n${body}`,
+            ),
+            resultCount: filteredHits.length,
+          };
         } catch (indexErr) {
           console.error(
             `[ai-mcp-brain] hybrid index failed, falling back to legacy search: ${
               indexErr instanceof Error ? indexErr.message : String(indexErr)
             }`,
           );
-          const hits = await searchNotes(vault, query, limit ?? 10);
+          const rawHits = await searchNotes(vault, query, fetchLimit);
+          const hits = policy
+            ? rawHits
+                .filter((h) => {
+                  const inf = inferNoteScopeAndProject(h.path);
+                  return canReadTarget(policy, inf.scope, inf.project);
+                })
+                .slice(0, requestedLimit)
+            : rawHits.slice(0, requestedLimit);
           if (!hits.length) {
-            return textResult(`No notes matched: ${query}`);
+            return { result: textResult(`No notes matched: ${query}`), resultCount: 0 };
           }
           const body = hits
             .map(
@@ -194,12 +384,12 @@ export function createBrainServer(): McpServer {
                 `${i + 1}. ${h.path} (${h.title}) [score=${h.score}]\n   ${h.snippet}`,
             )
             .join("\n\n");
-          return textResult(`Vault: ${vault} (legacy fallback)\n\n${body}`);
+          return {
+            result: textResult(`Vault: ${vault} (legacy fallback)\n\n${body}`),
+            resultCount: hits.length,
+          };
         }
-      } catch (err) {
-        return errorResult(err);
-      }
-    },
+      }),
   );
 
   server.registerTool(
@@ -227,25 +417,32 @@ export function createBrainServer(): McpServer {
           .describe("Max body characters to return (default 16000)"),
       },
     },
-    async ({ path, section, tail, max_chars }) => {
-      try {
-        const vault = await resolveVault();
+    async (args) =>
+      runGuarded("read_note", args, async ({ vault, policy }) => {
+        const { path, section, tail, max_chars } = args;
+        if (policy) {
+          const target = inferNoteScopeAndProject(path);
+          assertScopeAccess(policy, "read_note", "read", target.scope, target.project);
+        }
         const note = await readNote(vault, path);
         if (section?.trim()) {
           const span = findMarkdownSection(note.body, section);
           const slice = note.body.slice(span.start, span.end).trim();
-          return textResult(
-            `path: ${note.path}\ntitle: ${note.title}\nsection: ${span.heading}\n\n${slice}`,
-          );
+          return {
+            result: textResult(
+              `path: ${note.path}\ntitle: ${note.title}\nsection: ${span.heading}\n\n${slice}`,
+            ),
+            resultCount: 1,
+          };
         }
         const limit = max_chars ?? 16000;
-        return textResult(
-          tail ? noteToTailSummary(note, limit) : noteToSummary(note, limit),
-        );
-      } catch (err) {
-        return errorResult(err);
-      }
-    },
+        return {
+          result: textResult(
+            tail ? noteToTailSummary(note, limit) : noteToSummary(note, limit),
+          ),
+          resultCount: 1,
+        };
+      }),
   );
 
   server.registerTool(
@@ -280,15 +477,22 @@ export function createBrainServer(): McpServer {
           .describe("Optional filename stem for global notes"),
       },
     },
-    async (args) => {
-      try {
-        const vault = await resolveVault();
+    async (args) =>
+      runGuarded("remember", args, async ({ vault, policy }) => {
+        if (policy) {
+          const targetScope = args.scope ?? (args.project ? "project" : "global");
+          const targetProject =
+            targetScope === "project" && args.project
+              ? await resolveProjectSlug(vault, args.project)
+              : null;
+          assertScopeAccess(policy, "remember", "write", targetScope, targetProject);
+        }
         const note = await rememberNote(vault, args);
-        return textResult(`Wrote ${note.path}\n\n${noteToSummary(note, 800)}`);
-      } catch (err) {
-        return errorResult(err);
-      }
-    },
+        return {
+          result: textResult(`Wrote ${note.path}\n\n${noteToSummary(note, 800)}`),
+          resultCount: 1,
+        };
+      }),
   );
 
   server.registerTool(
@@ -311,18 +515,21 @@ export function createBrainServer(): McpServer {
           .describe("Max notes (default 20)"),
       },
     },
-    async ({ project, limit }) => {
-      try {
-        const vault = await resolveVault();
-        const { notes, ensured } = await getProjectContext(
-          vault,
-          project,
-          limit ?? 20,
-        );
+    async (args) =>
+      runGuarded("get_project_context", args, async ({ vault, policy }) => {
+        const { project, limit } = args;
+        const canonical = await resolveProjectSlug(vault, project);
+        if (policy) {
+          assertScopeAccess(policy, "get_project_context", "read", "project", canonical);
+        }
+        const allowCreate = policy ? canWriteTarget(policy, "project", canonical) : true;
+        const { notes, ensured } = await getProjectContext(vault, canonical, limit ?? 20, {
+          createIfMissing: allowCreate,
+        });
         const packNotes = notes.filter((n) => !/^projects\/[^/]+\/memories\.md$/.test(n.path));
         const activeMemories = await listMemories(vault, {
           scope: "project",
-          project,
+          project: canonical,
           status: "active",
           limit: 20,
         });
@@ -330,9 +537,10 @@ export function createBrainServer(): McpServer {
           ? `Created: ${ensured.join(", ")}\n`
           : "";
         if (!packNotes.length && !activeMemories.length) {
-          return textResult(
-            `${ensuredLine}No project notes yet for: ${project}`,
-          );
+          return {
+            result: textResult(`${ensuredLine}No project notes yet for: ${project}`),
+            resultCount: 0,
+          };
         }
         const parts = packNotes.map((n) => `---\n${noteToTailSummary(n, 2400)}`);
         if (activeMemories.length) {
@@ -345,13 +553,13 @@ export function createBrainServer(): McpServer {
           parts.push(`---\n## Active Atomic Memories (${activeMemories.length})\n\n${memBlock}`);
         }
         const body = parts.join("\n\n");
-        return textResult(
-          `Vault: ${vault}\nProject (git repo): ${project}\n${ensuredLine}Notes: ${packNotes.length}, Active memories: ${activeMemories.length}\n\n${body}`,
-        );
-      } catch (err) {
-        return errorResult(err);
-      }
-    },
+        return {
+          result: textResult(
+            `Vault: ${vault}\nProject (git repo): ${project}\n${ensuredLine}Notes: ${packNotes.length}, Active memories: ${activeMemories.length}\n\n${body}`,
+          ),
+          resultCount: packNotes.length + activeMemories.length,
+        };
+      }),
   );
 
   // --- Atomic memory tools (Markdown-backed) ---
@@ -394,25 +602,47 @@ export function createBrainServer(): McpServer {
           .describe("dedupe (default: skip near-exact dupes & flag conflicts) | force"),
       },
     },
-    async (args) => {
-      try {
-        const vault = await resolveVault();
+    async (args) =>
+      runGuarded("add_memory", args, async ({ vault, policy }) => {
+        if (policy) {
+          if (args.supersede_id) {
+            const existing = await findMemoryById(vault, args.supersede_id);
+            if (existing) {
+              assertScopeAccess(
+                policy,
+                "add_memory",
+                "write",
+                existing.block.memory.scope,
+                existing.block.memory.project,
+              );
+            }
+          } else {
+            const targetScope = args.scope ?? (args.project ? "project" : "global");
+            const targetProject =
+              targetScope === "project" && args.project
+                ? await resolveProjectSlug(vault, args.project)
+                : null;
+            assertScopeAccess(policy, "add_memory", "write", targetScope, targetProject);
+          }
+        }
         const res = await addMemorySmart(vault, {
           title: args.title,
           content: args.content,
           scope: args.scope,
           project: args.project,
           category: args.category as MemoryCategory | undefined,
-          app: args.app,
+          app: resolveMemoryApp(args.app),
           tags: args.tags,
           supersedeId: args.supersede_id,
           dedupe: args.dedupe,
+          dbPath: options.indexDbPath,
+          embedder: options.embedder,
         });
-        return textResult(JSON.stringify(res, null, 2));
-      } catch (err) {
-        return errorResult(err);
-      }
-    },
+        return {
+          result: textResult(JSON.stringify(res, null, 2)),
+          resultCount: 1,
+        };
+      }),
   );
 
   server.registerTool(
@@ -436,23 +666,65 @@ export function createBrainServer(): McpServer {
           .describe("active (default) | superseded | all"),
       },
     },
-    async (args) => {
-      try {
-        const vault = await resolveVault();
+    async (args) =>
+      runGuarded("search_memory", args, async ({ vault, policy }) => {
+        const canonicalProject = args.project
+          ? await resolveProjectSlug(vault, args.project)
+          : undefined;
+        if (policy) {
+          if (canonicalProject) {
+            assertScopeAccess(policy, "search_memory", "read", "project", canonicalProject);
+          } else if (args.scope && !policy.readScopes.includes(args.scope)) {
+            throw new AclDeniedError(
+              policy.app,
+              "search_memory",
+              `read access to ${args.scope} scope is not permitted`,
+            );
+          }
+        }
+
+        const effectiveScope =
+          args.scope ??
+          (policy && policy.readScopes.length === 1 ? policy.readScopes[0] : undefined);
+        const effectiveProject =
+          canonicalProject ??
+          (policy &&
+          !policy.readScopes.includes("global") &&
+          policy.allowedProjects.length === 1
+            ? policy.allowedProjects[0]
+            : undefined);
+
+        const requestedLimit = args.limit ?? 10;
+        const fetchLimit = hasReadRestriction(policy)
+          ? Math.min(200, requestedLimit * 4)
+          : requestedLimit;
+
         const res = await searchMemories(vault, args.query, {
-          limit: args.limit ?? 10,
+          limit: fetchLimit,
           mode: args.mode as SearchMode | undefined,
-          scope: args.scope,
-          project: args.project,
+          scope: effectiveScope,
+          project: effectiveProject,
           category: args.category as MemoryCategory | undefined,
           app: args.app,
           tags: args.tags,
           status: args.status ?? "active",
+          dbPath: options.indexDbPath,
+          embedder: options.embedder,
         });
-        if (!res.hits.length) {
-          return textResult(`No memories matched: ${args.query} (mode=${res.modeUsed})`);
+
+        const hits = policy
+          ? res.hits
+              .filter((h) => canReadTarget(policy, h.memory.scope, h.memory.project))
+              .slice(0, requestedLimit)
+          : res.hits.slice(0, requestedLimit);
+
+        if (!hits.length) {
+          return {
+            result: textResult(`No memories matched: ${args.query} (mode=${res.modeUsed})`),
+            resultCount: 0,
+          };
         }
-        const body = res.hits
+        const body = hits
           .map((h, i) => {
             const m = h.memory;
             const meta = [
@@ -470,13 +742,11 @@ export function createBrainServer(): McpServer {
             return `${i + 1}. [${m.id}] ${m.title} (${m.path}) [${meta}]\n   ${m.content}`;
           })
           .join("\n\n");
-        return textResult(
-          `Memories (mode=${res.modeUsed}, ${res.searchMs}ms)\n\n${body}`,
-        );
-      } catch (err) {
-        return errorResult(err);
-      }
-    },
+        return {
+          result: textResult(`Memories (mode=${res.modeUsed}, ${res.searchMs}ms)\n\n${body}`),
+          resultCount: hits.length,
+        };
+      }),
   );
 
   server.registerTool(
@@ -495,23 +765,43 @@ export function createBrainServer(): McpServer {
         limit: z.number().int().min(1).max(100).optional(),
       },
     },
-    async (args) => {
-      try {
-        const vault = await resolveVault();
-        const items = await listMemories(vault, {
+    async (args) =>
+      runGuarded("list_memories", args, async ({ vault, policy }) => {
+        const canonicalProject = args.project
+          ? await resolveProjectSlug(vault, args.project)
+          : undefined;
+        if (policy) {
+          if (canonicalProject) {
+            assertScopeAccess(policy, "list_memories", "read", "project", canonicalProject);
+          } else if (args.scope && !policy.readScopes.includes(args.scope)) {
+            throw new AclDeniedError(
+              policy.app,
+              "list_memories",
+              `read access to ${args.scope} scope is not permitted`,
+            );
+          }
+        }
+
+        const requestedLimit = args.limit ?? 30;
+        const all = await listMemories(vault, {
           scope: args.scope,
-          project: args.project,
+          project: canonicalProject,
           category: args.category as MemoryCategory | undefined,
           app: args.app,
           tags: args.tags,
           status: args.status ?? "active",
-          limit: args.limit ?? 30,
+          limit: hasReadRestriction(policy) ? undefined : requestedLimit,
         });
-        return textResult(JSON.stringify({ count: items.length, memories: items }, null, 2));
-      } catch (err) {
-        return errorResult(err);
-      }
-    },
+        const items = policy
+          ? all
+              .filter((m) => canReadTarget(policy, m.scope, m.project))
+              .slice(0, requestedLimit)
+          : all;
+        return {
+          result: textResult(JSON.stringify({ count: items.length, memories: items }, null, 2)),
+          resultCount: items.length,
+        };
+      }),
   );
 
   server.registerTool(
@@ -529,23 +819,37 @@ export function createBrainServer(): McpServer {
         app: z.string().optional(),
       },
     },
-    async (args) => {
-      try {
-        const vault = await resolveVault();
+    async (args) =>
+      runGuarded("update_memory", args, async ({ vault, policy }) => {
+        if (policy) {
+          const existing = await findMemoryById(vault, args.id);
+          if (existing) {
+            assertScopeAccess(
+              policy,
+              "update_memory",
+              "write",
+              existing.block.memory.scope,
+              existing.block.memory.project,
+            );
+          }
+        }
         const updated = await updateMemory(vault, {
           id: args.id,
           title: args.title,
           content: args.content,
           tags: args.tags,
           category: args.category as MemoryCategory | undefined,
-          app: args.app,
+          app: lockAppProvenance && configuredApp !== "anonymous" ? configuredApp : args.app,
         });
-        await syncVaultIndex(vault).catch(() => {});
-        return textResult(JSON.stringify(updated, null, 2));
-      } catch (err) {
-        return errorResult(err);
-      }
-    },
+        await syncVaultIndex(vault, {
+          dbPath: options.indexDbPath,
+          embedder: options.embedder,
+        }).catch(() => {});
+        return {
+          result: textResult(JSON.stringify(updated, null, 2)),
+          resultCount: 1,
+        };
+      }),
   );
 
   server.registerTool(
@@ -563,22 +867,36 @@ export function createBrainServer(): McpServer {
         app: z.string().optional(),
       },
     },
-    async (args) => {
-      try {
-        const vault = await resolveVault();
+    async (args) =>
+      runGuarded("supersede_memory", args, async ({ vault, policy }) => {
+        if (policy) {
+          const existing = await findMemoryById(vault, args.old_id);
+          if (existing) {
+            assertScopeAccess(
+              policy,
+              "supersede_memory",
+              "write",
+              existing.block.memory.scope,
+              existing.block.memory.project,
+            );
+          }
+        }
         const res = await supersedeMemory(vault, args.old_id, {
           title: args.title,
           content: args.content,
           tags: args.tags,
           category: args.category as MemoryCategory | undefined,
-          app: args.app,
+          app: resolveMemoryApp(args.app),
         });
-        await syncVaultIndex(vault).catch(() => {});
-        return textResult(JSON.stringify(res, null, 2));
-      } catch (err) {
-        return errorResult(err);
-      }
-    },
+        await syncVaultIndex(vault, {
+          dbPath: options.indexDbPath,
+          embedder: options.embedder,
+        }).catch(() => {});
+        return {
+          result: textResult(JSON.stringify(res, null, 2)),
+          resultCount: 1,
+        };
+      }),
   );
 
   server.registerTool(
@@ -591,16 +909,30 @@ export function createBrainServer(): McpServer {
         id: z.string().trim().min(1).describe("Memory ID to delete"),
       },
     },
-    async ({ id }) => {
-      try {
-        const vault = await resolveVault();
-        const res = await deleteMemory(vault, id);
-        await syncVaultIndex(vault).catch(() => {});
-        return textResult(JSON.stringify(res, null, 2));
-      } catch (err) {
-        return errorResult(err);
-      }
-    },
+    async (args) =>
+      runGuarded("delete_memory", args, async ({ vault, policy }) => {
+        if (policy) {
+          const existing = await findMemoryById(vault, args.id);
+          if (existing) {
+            assertScopeAccess(
+              policy,
+              "delete_memory",
+              "write",
+              existing.block.memory.scope,
+              existing.block.memory.project,
+            );
+          }
+        }
+        const res = await deleteMemory(vault, args.id);
+        await syncVaultIndex(vault, {
+          dbPath: options.indexDbPath,
+          embedder: options.embedder,
+        }).catch(() => {});
+        return {
+          result: textResult(JSON.stringify(res, null, 2)),
+          resultCount: 1,
+        };
+      }),
   );
 
   server.registerTool(
@@ -619,18 +951,20 @@ export function createBrainServer(): McpServer {
           .describe("Max entries (default 20)"),
       },
     },
-    async ({ limit }) => {
-      try {
-        const vault = await resolveVault();
-        const entries = await listRecent(vault, limit ?? 20);
-        if (!entries.length) {
-          return textResult("Recent log is empty.");
+    async (args) =>
+      runGuarded("list_recent", args, async ({ vault, policy }) => {
+        if (policy) {
+          assertScopeAccess(policy, "list_recent", "read", "global");
         }
-        return textResult(`Recent (newest first):\n\n${entries.join("\n")}`);
-      } catch (err) {
-        return errorResult(err);
-      }
-    },
+        const entries = await listRecent(vault, args.limit ?? 20);
+        if (!entries.length) {
+          return { result: textResult("Recent log is empty."), resultCount: 0 };
+        }
+        return {
+          result: textResult(`Recent (newest first):\n\n${entries.join("\n")}`),
+          resultCount: entries.length,
+        };
+      }),
   );
 
   server.registerTool(
@@ -653,17 +987,23 @@ export function createBrainServer(): McpServer {
         tags: z.array(z.string()).optional(),
       },
     },
-    async (args) => {
-      try {
-        const vault = await resolveVault();
+    async (args) =>
+      runGuarded("track_tool", args, async ({ vault, policy }) => {
+        if (policy) {
+          assertScopeAccess(policy, "track_tool", "write", "global");
+          if (args.project) {
+            const slug = await resolveProjectSlug(vault, args.project);
+            assertScopeAccess(policy, "track_tool", "write", "project", slug);
+          }
+        }
         const { catalog, recent } = await trackTool(vault, args);
-        return textResult(
-          `Catalog: ${catalog.path}\n\n${noteToSummary(catalog, 600)}\n\nRecent head:\n${recent.slice(0, 5).join("\n")}`,
-        );
-      } catch (err) {
-        return errorResult(err);
-      }
-    },
+        return {
+          result: textResult(
+            `Catalog: ${catalog.path}\n\n${noteToSummary(catalog, 600)}\n\nRecent head:\n${recent.slice(0, 5).join("\n")}`,
+          ),
+          resultCount: 1,
+        };
+      }),
   );
 
   server.registerTool(
@@ -699,26 +1039,41 @@ export function createBrainServer(): McpServer {
           .describe("Git repo slug for project overrides"),
       },
     },
-    async (args) => {
-      try {
-        const vault = await resolveVault();
-        const result = await resolveGuidance(vault, args);
-        if (!result.hits.length) {
-          return textResult(`${result.mode}: ${result.message}`);
+    async (args) =>
+      runGuarded("resolve_guidance", args, async ({ vault, policy }) => {
+        const canonicalProject = args.project
+          ? await resolveProjectSlug(vault, args.project)
+          : undefined;
+        if (policy && canonicalProject) {
+          assertScopeAccess(policy, "resolve_guidance", "read", "project", canonicalProject);
         }
-        const body = result.hits
+        const result = await resolveGuidance(vault, {
+          ...args,
+          project: canonicalProject,
+        });
+        const hits = policy
+          ? result.hits.filter((h) => {
+              const inf = inferNoteScopeAndProject(h.path);
+              return canReadTarget(policy, inf.scope, inf.project);
+            })
+          : result.hits;
+        if (!hits.length) {
+          return {
+            result: textResult(`${result.mode}: ${result.message}`),
+            resultCount: 0,
+          };
+        }
+        const body = hits
           .map(
             (h) =>
               `### ${h.scope} ${h.type} (${h.kindOrId})\npath: ${h.path}\n\n${noteToSummary(h.note, 2500)}`,
           )
           .join("\n\n---\n\n");
-        return textResult(
-          `mode: ${result.mode}\n${result.message}\n\n${body}`,
-        );
-      } catch (err) {
-        return errorResult(err);
-      }
-    },
+        return {
+          result: textResult(`mode: ${result.mode}\n${result.message}\n\n${body}`),
+          resultCount: hits.length,
+        };
+      }),
   );
 
   server.registerTool(
@@ -734,15 +1089,27 @@ export function createBrainServer(): McpServer {
           .describe("If set, include that project's overrides"),
       },
     },
-    async ({ project }) => {
-      try {
-        const vault = await resolveVault();
-        const listed = await listGuidance(vault, project);
-        return textResult(JSON.stringify(listed, null, 2));
-      } catch (err) {
-        return errorResult(err);
-      }
-    },
+    async (args) =>
+      runGuarded("list_guidance", args, async ({ vault, policy }) => {
+        const canonicalProject = args.project
+          ? await resolveProjectSlug(vault, args.project)
+          : undefined;
+        if (policy && canonicalProject) {
+          assertScopeAccess(policy, "list_guidance", "read", "project", canonicalProject);
+        }
+        const listed = await listGuidance(vault, canonicalProject);
+        if (policy && !canReadTarget(policy, "global")) {
+          const filtered = { ...listed, global: { instructions: [], suggestions: [], workflows: [] } };
+          return {
+            result: textResult(JSON.stringify(filtered, null, 2)),
+            resultCount: 1,
+          };
+        }
+        return {
+          result: textResult(JSON.stringify(listed, null, 2)),
+          resultCount: 1,
+        };
+      }),
   );
 
   server.registerTool(
@@ -783,9 +1150,15 @@ export function createBrainServer(): McpServer {
           ),
       },
     },
-    async (args) => {
-      try {
-        const vault = await resolveVault();
+    async (args) =>
+      runGuarded("upsert_guidance", args, async ({ vault, policy }) => {
+        if (policy) {
+          const slug =
+            args.scope === "project" && args.project
+              ? await resolveProjectSlug(vault, args.project)
+              : null;
+          assertScopeAccess(policy, "upsert_guidance", "write", args.scope, slug);
+        }
         const note = await upsertGuidance(vault, args);
         const how =
           args.mode === "replace"
@@ -795,13 +1168,11 @@ export function createBrainServer(): McpServer {
               : args.mode === "remove_section"
                 ? "Removed section"
                 : "Wrote";
-        return textResult(
-          `${how} ${note.path}\n\n${noteToSummary(note, 800)}`,
-        );
-      } catch (err) {
-        return errorResult(err);
-      }
-    },
+        return {
+          result: textResult(`${how} ${note.path}\n\n${noteToSummary(note, 800)}`),
+          resultCount: 1,
+        };
+      }),
   );
 
   server.registerTool(
@@ -826,13 +1197,31 @@ export function createBrainServer(): McpServer {
           .describe("If true, return paths only (default false = expand markdown)"),
       },
     },
-    async (args) => {
-      try {
-        const vault = await resolveVault();
-        const result = await resolveAction(vault, args);
-        if (!result.actionId) {
-          return textResult(result.message);
+    async (args) =>
+      runGuarded("resolve_action", args, async ({ vault, policy }) => {
+        const canonicalProject = args.project
+          ? await resolveProjectSlug(vault, args.project)
+          : undefined;
+        if (policy) {
+          if (canonicalProject) {
+            assertScopeAccess(policy, "resolve_action", "read", "project", canonicalProject);
+          } else {
+            assertScopeAccess(policy, "resolve_action", "read", "global");
+          }
         }
+        const result = await resolveAction(vault, {
+          ...args,
+          project: canonicalProject,
+        });
+        if (!result.actionId) {
+          return { result: textResult(result.message), resultCount: 0 };
+        }
+        const allowedPointers = policy
+          ? result.pointers.filter((p) => {
+              const inf = inferNoteScopeAndProject(p.path);
+              return canReadTarget(policy, inf.scope, inf.project);
+            })
+          : result.pointers;
         const header = [
           `action: ${result.actionId}`,
           result.description ? `description: ${result.description}` : null,
@@ -844,18 +1233,19 @@ export function createBrainServer(): McpServer {
           .filter(Boolean)
           .join("\n");
 
-        if (args.pointers_only) {
-          return textResult(
-            `${header}\n\npointers:\n${JSON.stringify(result.pointers, null, 2)}`,
-          );
+        if (args.pointers_only || (policy && !canReadTarget(policy, "global"))) {
+          return {
+            result: textResult(
+              `${header}\n\npointers:\n${JSON.stringify(allowedPointers, null, 2)}`,
+            ),
+            resultCount: allowedPointers.length,
+          };
         }
-        return textResult(
-          `${header}\n\n${result.bundle || "(no note bodies)"}`,
-        );
-      } catch (err) {
-        return errorResult(err);
-      }
-    },
+        return {
+          result: textResult(`${header}\n\n${result.bundle || "(no note bodies)"}`),
+          resultCount: allowedPointers.length,
+        };
+      }),
   );
 
   server.registerTool(
@@ -868,15 +1258,24 @@ export function createBrainServer(): McpServer {
         project: z.string().optional().describe("Git repo slug for overlay"),
       },
     },
-    async ({ project }) => {
-      try {
-        const vault = await resolveVault();
-        const listed = await listActions(vault, project);
-        return textResult(JSON.stringify(listed, null, 2));
-      } catch (err) {
-        return errorResult(err);
-      }
-    },
+    async (args) =>
+      runGuarded("list_actions", args, async ({ vault, policy }) => {
+        const canonicalProject = args.project
+          ? await resolveProjectSlug(vault, args.project)
+          : undefined;
+        if (policy) {
+          if (canonicalProject) {
+            assertScopeAccess(policy, "list_actions", "read", "project", canonicalProject);
+          } else {
+            assertScopeAccess(policy, "list_actions", "read", "global");
+          }
+        }
+        const listed = await listActions(vault, canonicalProject);
+        return {
+          result: textResult(JSON.stringify(listed, null, 2)),
+          resultCount: Object.keys(listed.actions).length,
+        };
+      }),
   );
 
   server.registerTool(
@@ -902,14 +1301,15 @@ export function createBrainServer(): McpServer {
           ),
       },
     },
-    async ({ refresh, jql, scope }) => {
-      try {
-        const result = await toolJiraAssigned({ refresh, jql, scope });
-        return textResult(JSON.stringify(result, null, 2));
-      } catch (err) {
-        return errorResult(err);
-      }
-    },
+    async (args) =>
+      runGuarded("jira_assigned", args, async ({ policy }) => {
+        if (policy) assertScopeAccess(policy, "jira_assigned", "read", "global");
+        const result = await toolJiraAssigned(args);
+        return {
+          result: textResult(JSON.stringify(result, null, 2)),
+          resultCount: Array.isArray(result.issues) ? result.issues.length : null,
+        };
+      }),
   );
 
   server.registerTool(
@@ -935,14 +1335,19 @@ export function createBrainServer(): McpServer {
           .describe("Optional day-log line when completing"),
       },
     },
-    async ({ op, key, text, note, log }) => {
-      try {
-        const result = await toolWorkToday({ op, key, text, note, log });
-        return textResult(JSON.stringify(result, null, 2));
-      } catch (err) {
-        return errorResult(err);
-      }
-    },
+    async (args) =>
+      runGuarded("work_today", args, async ({ policy }) => {
+        if (policy) {
+          const op = classifyToolOperation("work_today", args);
+          assertScopeAccess(policy, "work_today", op, "global");
+        }
+        const result = await toolWorkToday(args);
+        const openItems = (result as { open?: unknown[] }).open;
+        return {
+          result: textResult(JSON.stringify(result, null, 2)),
+          resultCount: Array.isArray(openItems) ? openItems.length : 1,
+        };
+      }),
   );
 
   server.registerTool(
@@ -964,17 +1369,22 @@ export function createBrainServer(): McpServer {
           ),
       },
     },
-    async ({ refresh, scope }) => {
-      try {
-        const result = await toolWorkPlate({ refresh, scope });
-        return textResult(JSON.stringify(result, null, 2));
-      } catch (err) {
-        if (err instanceof JiraNotConfiguredError) {
-          return errorResult(err);
+    async (args) =>
+      runGuarded("work_plate", args, async ({ policy }) => {
+        if (policy) assertScopeAccess(policy, "work_plate", "read", "global");
+        try {
+          const result = await toolWorkPlate(args);
+          return {
+            result: textResult(JSON.stringify(result, null, 2)),
+            resultCount: 1,
+          };
+        } catch (err) {
+          if (err instanceof JiraNotConfiguredError) {
+            return { result: errorResult(err), resultCount: 0 };
+          }
+          throw err;
         }
-        return errorResult(err);
-      }
-    },
+      }),
   );
 
   server.registerTool(
@@ -1033,14 +1443,18 @@ export function createBrainServer(): McpServer {
           .describe("Issues to create before push (user-confirmed)"),
       },
     },
-    async (args) => {
-      try {
+    async (args) =>
+      runGuarded("work_log", args, async ({ policy }) => {
+        if (policy) {
+          const op = classifyToolOperation("work_log", args);
+          assertScopeAccess(policy, "work_log", op, "global");
+        }
         const result = await toolWorkLog(args);
-        return textResult(JSON.stringify(result, null, 2));
-      } catch (err) {
-        return errorResult(err);
-      }
-    },
+        return {
+          result: textResult(JSON.stringify(result, null, 2)),
+          resultCount: 1,
+        };
+      }),
   );
 
   server.registerTool(
@@ -1074,14 +1488,18 @@ export function createBrainServer(): McpServer {
         description: z.string().optional().describe("Version description"),
       },
     },
-    async (args) => {
-      try {
+    async (args) =>
+      runGuarded("jira_release", args, async ({ policy }) => {
+        if (policy) {
+          const op = classifyToolOperation("jira_release", args);
+          assertScopeAccess(policy, "jira_release", op, "global");
+        }
         const result = await toolJiraRelease(args);
-        return textResult(JSON.stringify(result, null, 2));
-      } catch (err) {
-        return errorResult(err);
-      }
-    },
+        return {
+          result: textResult(JSON.stringify(result, null, 2)),
+          resultCount: 1,
+        };
+      }),
   );
 
   return server;
@@ -1089,7 +1507,8 @@ export function createBrainServer(): McpServer {
 
 async function main(): Promise<void> {
   await loadEnvFile(join(configDir(), ".env"));
-  const vault = await resolveVault();
+  const config = await loadConfig();
+  const vault = resolveVaultPath(config.vault_path);
   const info = await vaultInfo(vault);
   if (!info.readable) {
     console.error(
@@ -1104,7 +1523,7 @@ async function main(): Promise<void> {
       `[ai-mcp-brain] MCP server ready (vault: ${vault}, notes: ${info.noteCount})`,
     );
   }
-  const server = createBrainServer();
+  const server = createBrainServer({ vaultPath: vault });
   const transport = new StdioServerTransport();
   await server.connect(transport);
 
@@ -1125,8 +1544,6 @@ async function main(): Promise<void> {
       });
   }
 }
-
-import { isMainModule } from "../runtime.ts";
 
 if (isMainModule(import.meta.url)) {
   main().catch((err) => {

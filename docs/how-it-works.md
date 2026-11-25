@@ -5,7 +5,7 @@
 Three layers:
 
 1. **Vault** — Obsidian-compatible markdown. Source of truth for durable knowledge and process.
-2. **MCP server (`ai-mcp-brain`)** — Structured read/write API for agents over stdio.
+2. **MCP server (`ai-mcp-brain`)** — Structured read/write API for agents over stdio (`npm run mcp`) or the shared local Streamable HTTP daemon (`npm run daemon` at `http://127.0.0.1:4190/mcp?app=<harness>` with per-app ACLs, audit log, and control UI at `http://127.0.0.1:4190/`).
 3. **Harness policy** — A short memory policy injected into Cursor / Claude / Codex / Zed so agents know when to search, resolve process, and write.
 
 Humans and agents share the same files. Agents should not invent vault facts or process; they search and resolve first.

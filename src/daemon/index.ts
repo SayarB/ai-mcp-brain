@@ -1,0 +1,41 @@
+export {
+  AclDeniedError,
+  assertScopeAccess,
+  canReadTarget,
+  canWriteTarget,
+  checkToolAccess,
+  classifyToolOperation,
+  defaultAppPolicy,
+  inferNoteScopeAndProject,
+  isProjectAllowed,
+  mergeAppPolicy,
+  normalizeAppNameOrDefault,
+  redactLogSummary,
+  summarizeToolCall,
+  validateAppName,
+  type AccessMode,
+  type AppPolicy,
+  type AppPolicyPatch,
+  type AppRecord,
+  type PolicySource,
+  type ScopeFilter,
+  type ToolOperation,
+} from "./acl.ts";
+export {
+  DaemonStateStore,
+  DAEMON_STATE_SCHEMA_VERSION,
+  defaultDaemonStateDbPath,
+  type AccessLogEntry,
+  type AccessLogInput,
+  type AccessLogQuery,
+  type AccessStatus,
+  type AppWithStats,
+} from "./state.ts";
+export {
+  DEFAULT_DAEMON_HOST,
+  DEFAULT_DAEMON_PORT,
+  startBrainDaemon,
+  type BrainDaemonHandle,
+  type DaemonOptions,
+} from "./server.ts";
+export { renderDashboardHtml } from "./ui.ts";

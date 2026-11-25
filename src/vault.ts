@@ -300,9 +300,13 @@ export async function getProjectContext(
   vaultPath: string,
   project: string,
   limit = 20,
+  opts?: { createIfMissing?: boolean },
 ): Promise<{ notes: VaultNote[]; ensured: string[] }> {
   const canonicalSlug = await resolveProjectSlug(vaultPath, project);
-  const { slug, created } = await ensureProject(vaultPath, canonicalSlug);
+  const { slug, created } =
+    opts?.createIfMissing === false
+      ? { slug: slugify(canonicalSlug), created: [] as string[] }
+      : await ensureProject(vaultPath, canonicalSlug);
   const needle = slug.toLowerCase();
   const paths = await listNotePaths(vaultPath);
   const matched: VaultNote[] = [];

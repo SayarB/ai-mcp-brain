@@ -49,9 +49,12 @@ Then: open vault in Obsidian → restart editors → MCP `vault_info` → `reada
 
 | Command | Purpose |
 |---------|---------|
-| `npm run mcp` / `bun run mcp` | MCP server |
+| `npm run mcp` / `bun run mcp` | MCP server (stdio) |
+| `npm run daemon` / `bun run daemon` | Shared Streamable HTTP MCP daemon (`127.0.0.1:4190/mcp?app=<harness>`) + local control UI (`http://127.0.0.1:4190/`) |
 | `npm run setup` / `bun run setup` | Optional one-shot install |
-| `npm run brain -- …` | Optional advanced init/inject |
+| `npm run brain -- …` | CLI (`init`, `inject`, `daemon`, `acl`, `reindex`, `search`, `memory`) |
+
+To connect harnesses to the shared HTTP daemon instead of per-client stdio processes, start `npm run daemon` (or `bun run daemon`) and run `npm run brain -- inject --transport http`. Manage per-harness pause toggles, read-only/project scopes, live access logs, and hybrid search score debugging at `http://127.0.0.1:4190/` or via `brain acl <list|set|pause|resume|reset>`.
 
 Inject prefers **Bun** for the MCP command when available; otherwise **Node + `tsx`**. Env: `BRAIN_VAULT` overrides vault path.
 
@@ -150,7 +153,10 @@ src/config.ts           # config.toml + BRAIN_VAULT
 src/init.ts             # vault scaffolding
 src/inject.ts           # harness injection
 src/vault.ts            # note IO helpers
-src/mcp/server.ts       # stdio MCP server
+src/index/              # disposable SQLite hybrid search index (FTS5 + local embeddings)
+src/memory/             # atomic Markdown memories + dedup + write-time secret guard
+src/daemon/             # Streamable HTTP MCP daemon, per-app ACLs, audit log & local UI
+src/mcp/server.ts       # stdio MCP server + shared tool registry
 templates/vault/        # Obsidian seed tree
 templates/prompts/      # agent memory prompts
 templates/rules/        # Cursor / Claude / Codex snippets

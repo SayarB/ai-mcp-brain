@@ -414,7 +414,7 @@ When you change **how install works** on a new machine, update **all** of the fo
 | [`skills/orchesto-remove/`](skills/orchesto-remove/) | Remove-Orchesto skill playbook |
 | [`templates/vault/`](templates/vault/) | What a fresh vault contains (includes persona workflows) |
 | [`templates/prompts/memory-policy.md`](templates/prompts/memory-policy.md) | Injected slim policy |
-| [`package.json`](package.json) scripts | `setup` / `brain` / `mcp` / `restart-mcp` entrypoints |
+| [`package.json`](package.json) scripts | `setup` / `brain` / `mcp` / `daemon` / `restart-mcp` entrypoints |
 | [`.githooks/post-push`](.githooks/post-push) + [`scripts/restart-mcp.sh`](scripts/restart-mcp.sh) | After push: inject Orchesto (fail-open) then kill local MCP so the harness respawns (`git config core.hooksPath .githooks`) |
 | [`config.example.toml`](config.example.toml), [`mcp.cursor.example.json`](mcp.cursor.example.json), [`.env.example`](.env.example) | Portable examples (placeholders; no secrets) |
 | [`README.md`](README.md) / [`docs/guides/getting-started.md`](docs/guides/getting-started.md) | Points here; mention greenfield agent install |

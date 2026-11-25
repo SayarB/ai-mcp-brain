@@ -20,6 +20,12 @@ import {
 import { syncOrchestoVaultPersonas } from "./orchesto-sync.ts";
 
 export type InjectTarget = "cursor" | "claude" | "codex" | "zed" | "all";
+export type InjectTransport = "stdio" | "http";
+
+export type InjectOptions = {
+  transport?: InjectTransport;
+  daemonUrl?: string;
+};
 
 export type InjectAction = {
   target: string;
@@ -37,12 +43,21 @@ function mcpServerScript(): string {
   return resolve(configDir(), "src", "mcp", "server.ts");
 }
 
-function mcpLaunchConfig(vaultPath: string): McpLaunch {
-  return resolveMcpLaunch(configDir(), mcpServerScript(), vaultPath);
+function mcpLaunchConfig(vaultPath: string, app?: string): McpLaunch {
+  const launch = resolveMcpLaunch(configDir(), mcpServerScript(), vaultPath);
+  if (app) {
+    return { ...launch, env: { ...launch.env, BRAIN_APP: app } };
+  }
+  return launch;
+}
+
+function normalizeDaemonUrl(raw?: string): string {
+  const base = (raw?.trim() || "http://127.0.0.1:4190").replace(/\/+$/, "");
+  return base.endsWith("/mcp") ? base.slice(0, -4) : base;
 }
 
 function zedContextServerConfig(vaultPath: string): Record<string, unknown> {
-  const launch = mcpLaunchConfig(vaultPath);
+  const launch = mcpLaunchConfig(vaultPath, "zed");
   // Zed docs: command + args + env (cwd not documented; BRAIN_VAULT is enough)
   return {
     enabled: true,
@@ -105,6 +120,7 @@ async function injectCursorRules(
   config: BrainConfig,
   policy: string,
   vaultPath: string,
+  opts?: InjectOptions,
 ): Promise<InjectAction[]> {
   const actions: InjectAction[] = [];
   const rulesDir = resolve(expandHome(config.inject.cursor_rules_dir));
@@ -114,11 +130,11 @@ async function injectCursorRules(
   actions.push({ target: "cursor-rules", path: rulePath, action });
 
   const mcpPath = resolve(expandHome(config.inject.cursor_mcp_file));
-  actions.push(await mergeCursorMcp(mcpPath, vaultPath));
+  actions.push(await mergeCursorMcp(mcpPath, vaultPath, opts));
 
   // Also write project-local MCP config (Cursor often prefers this in-repo)
   const projectMcp = resolve(configDir(), ".cursor", "mcp.json");
-  actions.push(await mergeCursorMcp(projectMcp, vaultPath));
+  actions.push(await mergeCursorMcp(projectMcp, vaultPath, opts));
   actions.push(await mergeCursorHooks(config));
   return actions;
 }
@@ -159,6 +175,7 @@ export async function mergeCursorHooks(
 async function mergeCursorMcp(
   mcpPath: string,
   vaultPath: string,
+  opts?: InjectOptions,
 ): Promise<InjectAction> {
   await mkdir(dirname(mcpPath), { recursive: true });
   let root: { mcpServers?: Record<string, unknown> } = {};
@@ -173,7 +190,19 @@ async function mergeCursorMcp(
     root.mcpServers = {};
   }
 
-  const launch = mcpLaunchConfig(vaultPath);
+  if (opts?.transport === "http") {
+    const url = `${normalizeDaemonUrl(opts.daemonUrl)}/mcp?app=cursor`;
+    root.mcpServers["ai-mcp-brain"] = { url };
+    await writeText(mcpPath, `${JSON.stringify(root, null, 2)}\n`);
+    return {
+      target: "cursor-mcp",
+      path: mcpPath,
+      action: "merged",
+      detail: `mcpServers.ai-mcp-brain (Streamable HTTP: ${url})`,
+    };
+  }
+
+  const launch = mcpLaunchConfig(vaultPath, "cursor");
   root.mcpServers["ai-mcp-brain"] = {
     command: launch.command,
     args: launch.args,
@@ -186,7 +215,7 @@ async function mergeCursorMcp(
     target: "cursor-mcp",
     path: mcpPath,
     action: "merged",
-    detail: `mcpServers.ai-mcp-brain (+ cwd, BRAIN_VAULT, ${launch.runtime})`,
+    detail: `mcpServers.ai-mcp-brain (+ cwd, BRAIN_VAULT, BRAIN_APP=cursor, ${launch.runtime})`,
   };
 }
 
@@ -210,24 +239,41 @@ async function injectMarkedFile(
 async function injectCodexMcp(
   configPath: string,
   vaultPath: string,
+  opts?: InjectOptions,
 ): Promise<InjectAction> {
   await mkdir(dirname(configPath), { recursive: true });
   const existing = (await pathExists(configPath))
     ? await readText(configPath)
     : "";
-  const launch = mcpLaunchConfig(vaultPath);
-  const block = [
-    CODEX_MCP_START,
-    "[mcp_servers.ai-mcp-brain]",
-    `command = ${JSON.stringify(launch.command)}`,
-    `args = [${launch.args.map((a) => JSON.stringify(a)).join(", ")}]`,
-    `cwd = ${JSON.stringify(launch.cwd)}`,
-    "[mcp_servers.ai-mcp-brain.env]",
-    ...Object.entries(launch.env).map(
-      ([k, v]) => `${k} = ${JSON.stringify(v)}`,
-    ),
-    CODEX_MCP_END,
-  ].join("\n");
+
+  let block: string;
+  let detail: string;
+  if (opts?.transport === "http") {
+    const url = `${normalizeDaemonUrl(opts.daemonUrl)}/mcp?app=codex`;
+    block = [
+      CODEX_MCP_START,
+      "[mcp_servers.ai-mcp-brain]",
+      `url = ${JSON.stringify(url)}`,
+      CODEX_MCP_END,
+    ].join("\n");
+    detail = `mcp_servers.ai-mcp-brain (Streamable HTTP: ${url})`;
+  } else {
+    const launch = mcpLaunchConfig(vaultPath, "codex");
+    block = [
+      CODEX_MCP_START,
+      "[mcp_servers.ai-mcp-brain]",
+      `command = ${JSON.stringify(launch.command)}`,
+      `args = [${launch.args.map((a) => JSON.stringify(a)).join(", ")}]`,
+      `cwd = ${JSON.stringify(launch.cwd)}`,
+      "[mcp_servers.ai-mcp-brain.env]",
+      ...Object.entries(launch.env).map(
+        ([k, v]) => `${k} = ${JSON.stringify(v)}`,
+      ),
+      CODEX_MCP_END,
+    ].join("\n");
+    const envKeys = Object.keys(launch.env).join(", ");
+    detail = `mcp_servers.ai-mcp-brain (+ cwd, env: ${envKeys}, ${launch.runtime})`;
+  }
 
   const { next, updated } = upsertMarkedBlock(
     existing,
@@ -236,12 +282,11 @@ async function injectCodexMcp(
     CODEX_MCP_END,
   );
   const action = await writeFileEnsured(configPath, next);
-  const envKeys = Object.keys(launch.env).join(", ");
   return {
     target: "codex-mcp",
     path: configPath,
     action: updated ? "updated" : action,
-    detail: `mcp_servers.ai-mcp-brain (+ cwd, env: ${envKeys}, ${launch.runtime})`,
+    detail,
   };
 }
 
@@ -440,6 +485,7 @@ export async function installOrchestoSkills(
 
 export async function injectHarnesses(
   target: InjectTarget = "all",
+  opts?: InjectOptions,
 ): Promise<{ vaultPath: string; actions: InjectAction[] }> {
   const config = await loadConfig();
   const vaultPath = resolveVaultPath(config.vault_path);
@@ -452,7 +498,7 @@ export async function injectHarnesses(
   const doZed = target === "all" || target === "zed";
 
   if (doCursor) {
-    actions.push(...(await injectCursorRules(config, policy, vaultPath)));
+    actions.push(...(await injectCursorRules(config, policy, vaultPath, opts)));
   }
   if (doClaude) {
     actions.push(
@@ -477,6 +523,7 @@ export async function injectHarnesses(
       await injectCodexMcp(
         resolve(expandHome(config.inject.codex_config)),
         vaultPath,
+        opts,
       ),
     );
   }
