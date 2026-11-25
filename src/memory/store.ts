@@ -12,7 +12,7 @@
  * All writes are serialized per file and written via atomic temp-file + rename.
  */
 import { randomBytes } from "node:crypto";
-import { mkdir, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, open, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { pathExists, readText } from "../runtime.ts";
 import {
@@ -90,24 +90,101 @@ const MEM_END_RE = /^<!--\s*\/mem:([^\s<>]+)\s*-->$/;
 const SECTION_HEADING_RE = /^###\s+(.+?)\s*$/;
 const SUPERSEDED_CALLOUT_RE = /^>\s*_Superseded by\s+\S+.*?_\s*$/;
 
-/** Per-file in-process write mutex to serialize concurrent MCP/CLI mutations. */
+/** Per-file in-process mutex + cross-process O_EXCL lockfile so MCP servers and CLI never clobber writes. */
 const fileLocks = new Map<string, Promise<void>>();
+const LOCK_RETRY_MS = 25;
+const LOCK_TIMEOUT_MS = 5000;
+const STALE_LOCK_MS = 15000;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+function isPidAlive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException)?.code === "EPERM";
+  }
+}
+
+async function acquireLockfile(lockPath: string): Promise<() => Promise<void>> {
+  await mkdir(dirname(lockPath), { recursive: true });
+  const deadline = Date.now() + LOCK_TIMEOUT_MS;
+  const ownerToken = `${process.pid}:${randomBytes(6).toString("hex")}`;
+
+  while (true) {
+    try {
+      const handle = await open(lockPath, "wx");
+      try {
+        await handle.writeFile(`${ownerToken}\n`, "utf8");
+      } finally {
+        await handle.close();
+      }
+      return async () => {
+        try {
+          const current = (await readText(lockPath)).trim();
+          if (current === ownerToken) {
+            await rm(lockPath, { force: true });
+          }
+        } catch {
+          /* already removed */
+        }
+      };
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException)?.code;
+      if (code !== "EEXIST") throw err;
+      try {
+        const [st, rawOwner] = await Promise.all([
+          stat(lockPath),
+          readText(lockPath).catch(() => ""),
+        ]);
+        const holderPid = Number(rawOwner.trim().split(":")[0]);
+        const ownerDead =
+          rawOwner.trim().length > 0 &&
+          Number.isInteger(holderPid) &&
+          holderPid > 0 &&
+          !isPidAlive(holderPid);
+        const isStale = Date.now() - st.mtimeMs > STALE_LOCK_MS || ownerDead;
+        if (isStale) {
+          // Verify lock content unchanged before removing so we never unlink a fresh owner's lock
+          const latest = await readText(lockPath).catch(() => "");
+          if (latest === rawOwner) {
+            await rm(lockPath, { force: true }).catch(() => {});
+            continue;
+          }
+        }
+      } catch {
+        continue;
+      }
+      if (Date.now() >= deadline) {
+        throw new Error(`Timed out waiting for lockfile: ${lockPath}`);
+      }
+      await sleep(LOCK_RETRY_MS);
+    }
+  }
+}
 
 async function withFileLock<T>(absPath: string, fn: () => Promise<T>): Promise<T> {
   const key = resolve(absPath);
   const prev = fileLocks.get(key) ?? Promise.resolve();
-  let release!: () => void;
+  let releaseInProcess!: () => void;
   const gate = new Promise<void>((r) => {
-    release = r;
+    releaseInProcess = r;
   });
   const chained = prev.then(() => gate);
   fileLocks.set(key, chained);
 
   await prev;
+  let releaseLockfile: (() => Promise<void>) | null = null;
   try {
+    releaseLockfile = await acquireLockfile(`${key}.lock`);
     return await fn();
   } finally {
-    release();
+    if (releaseLockfile) await releaseLockfile();
+    releaseInProcess();
     if (fileLocks.get(key) === chained) {
       fileLocks.delete(key);
     }
@@ -157,12 +234,64 @@ export function sanitizeMemoryTitle(raw: string): string {
   return cleaned;
 }
 
+/** Track Markdown fenced code blocks respecting fence char (` vs ~) and fence length per CommonMark. */
+function updateFenceState(
+  line: string,
+  state: { char: string; len: number } | null,
+): { char: string; len: number } | null {
+  const m = line.match(/^\s*(`{3,}|~{3,})(.*)$/);
+  if (!m?.[1]) return state;
+  const ch = m[1][0]!;
+  const len = m[1].length;
+  const rest = (m[2] ?? "").trim();
+  if (!state) {
+    return { char: ch, len };
+  }
+  if (ch === state.char && len >= state.len && rest === "") {
+    return null;
+  }
+  return state;
+}
+
+/** Splice replacement lines into `lines[start..end)` cleanly without collapsing blank lines elsewhere in the file. */
+function spliceLinesCleanly(
+  lines: string[],
+  startLine: number,
+  endLine: number,
+  replacement: string[],
+): string {
+  const before = lines.slice(0, startLine);
+  while (before.length && before[before.length - 1]!.trim() === "") before.pop();
+  const after = lines.slice(endLine);
+  while (after.length && after[0]!.trim() === "") after.shift();
+
+  const out: string[] = [];
+  if (before.length) out.push(...before);
+  if (replacement.length) {
+    if (out.length) out.push("");
+    out.push(...replacement);
+  }
+  if (after.length) {
+    if (out.length) out.push("");
+    out.push(...after);
+  }
+  return out.join("\n").trimEnd() + "\n";
+}
+
 export function sanitizeMemoryContent(raw: string): string {
-  const cleaned = raw
+  let cleaned = raw
     .replace(/<!--(\s*\/?mem:)/gi, "&lt;!--$1")
     .trim();
   if (!cleaned) {
     throw new Error("Memory content must be non-empty after trimming.");
+  }
+  // Balance any unclosed Markdown code fence so rendering in Obsidian never bleeds into the next memory
+  let fence: { char: string; len: number } | null = null;
+  for (const line of cleaned.split(/\r?\n/)) {
+    fence = updateFenceState(line, fence);
+  }
+  if (fence) {
+    cleaned = `${cleaned}\n${fence.char.repeat(fence.len)}`;
   }
   return cleaned;
 }
@@ -276,15 +405,16 @@ export function parseMemoryFile(relPath: string, markdown: string): ParsedBlock[
   const blocks: ParsedBlock[] = [];
 
   let i = 0;
-  let inFence = false;
+  let outerFence: { char: string; len: number } | null = null;
   while (i < lines.length) {
     const line = lines[i]!;
-    if (/^\s*(`{3,}|~{3,})/.test(line)) {
-      inFence = !inFence;
+    const nextOuterFence = updateFenceState(line, outerFence);
+    if (nextOuterFence !== outerFence) {
+      outerFence = nextOuterFence;
       i++;
       continue;
     }
-    if (inFence) {
+    if (outerFence) {
       i++;
       continue;
     }
@@ -304,28 +434,30 @@ export function parseMemoryFile(relPath: string, markdown: string): ParsedBlock[
       continue;
     }
 
-    // Scan for explicit closing marker `<!-- /mem:<id> -->` (preferred),
-    // falling back to next memory block or H1/H2 heading for legacy files without end markers.
+    // Scan for explicit closing marker `<!-- /mem:<id> -->` BEFORE fence tracking:
+    // the sanitizer escapes `<!-- /mem:` in user content, so a matching closing marker is always
+    // authoritative even if user content contains an unclosed code fence.
     let end = metaIdx + 1;
     let bodyEnd = end;
-    let blockFence = false;
+    let blockFence: { char: string; len: number } | null = null;
     let foundEndMarker = false;
     while (end < lines.length) {
       const cur = lines[end]!;
-      if (/^\s*(`{3,}|~{3,})/.test(cur)) {
-        blockFence = !blockFence;
+      const endMatch = cur.trim().match(MEM_END_RE);
+      if (endMatch?.[1] === meta.id) {
+        bodyEnd = end;
+        end++; // include closing marker in block span
+        foundEndMarker = true;
+        break;
+      }
+      const nextBlockFence = updateFenceState(cur, blockFence);
+      if (nextBlockFence !== blockFence) {
+        blockFence = nextBlockFence;
         end++;
         bodyEnd = end;
         continue;
       }
       if (!blockFence) {
-        const endMatch = cur.trim().match(MEM_END_RE);
-        if (endMatch?.[1] === meta.id) {
-          bodyEnd = end;
-          end++; // include closing marker in block span
-          foundEndMarker = true;
-          break;
-        }
         // Fallback boundary for legacy blocks without closing marker: stop at next memory header
         if (SECTION_HEADING_RE.test(cur)) {
           let probe = end + 1;
@@ -341,11 +473,12 @@ export function parseMemoryFile(relPath: string, markdown: string): ParsedBlock[
     }
     if (!foundEndMarker) {
       // Legacy fallback: if no end marker was present and there's an H1/H2 heading inside, trim at first H1/H2
-      let scanFence = false;
+      let scanFence: { char: string; len: number } | null = null;
       for (let k = metaIdx + 1; k < bodyEnd; k++) {
         const cur = lines[k]!;
-        if (/^\s*(`{3,}|~{3,})/.test(cur)) {
-          scanFence = !scanFence;
+        const nextScan = updateFenceState(cur, scanFence);
+        if (nextScan !== scanFence) {
+          scanFence = nextScan;
           continue;
         }
         if (!scanFence && /^#{1,2}\s+/.test(cur)) {
@@ -675,19 +808,8 @@ export async function touchMemory(
 
     const lines = lf.split("\n");
     const replacement = renderMemoryBlock(updatedMem).split("\n");
-    const nextLines = [
-      ...lines.slice(0, hit.startLine),
-      ...replacement,
-      "",
-      ...lines.slice(hit.endLine),
-    ];
-    const nextMd = applyEol(
-      bumpFrontmatterUpdated(
-        nextLines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n",
-        date,
-      ),
-      eol,
-    );
+    const spliced = spliceLinesCleanly(lines, hit.startLine, hit.endLine, replacement);
+    const nextMd = applyEol(bumpFrontmatterUpdated(spliced, date), eol);
     await writeTextAtomic(located.absPath, nextMd);
     return updatedMem;
   });
@@ -744,19 +866,8 @@ export async function updateMemory(
     const srcLines = srcLf.split("\n");
     if (!needsMove) {
       const replacement = renderMemoryBlock(updatedMem).split("\n");
-      const nextLines = [
-        ...srcLines.slice(0, hit.startLine),
-        ...replacement,
-        "",
-        ...srcLines.slice(hit.endLine),
-      ];
-      const nextMd = applyEol(
-        bumpFrontmatterUpdated(
-          nextLines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n",
-          date,
-        ),
-        srcEol,
-      );
+      const spliced = spliceLinesCleanly(srcLines, hit.startLine, hit.endLine, replacement);
+      const nextMd = applyEol(bumpFrontmatterUpdated(spliced, date), srcEol);
       await writeTextAtomic(located.absPath, nextMd);
       return updatedMem;
     }
@@ -777,13 +888,7 @@ export async function updateMemory(
       applyEol(bumpFrontmatterUpdated(destInserted, date), destEol),
     );
 
-    const srcRemoved = [
-      ...srcLines.slice(0, hit.startLine),
-      ...srcLines.slice(hit.endLine),
-    ]
-      .join("\n")
-      .replace(/\n{3,}/g, "\n\n")
-      .trimEnd() + "\n";
+    const srcRemoved = spliceLinesCleanly(srcLines, hit.startLine, hit.endLine, []);
     await writeTextAtomic(
       located.absPath,
       applyEol(bumpFrontmatterUpdated(srcRemoved, date), srcEol),
@@ -894,15 +999,12 @@ export async function supersedeMemory(
 
     // Replace old block in source file
     const srcLines = srcLf.split("\n");
-    const srcWithSuperseded = [
-      ...srcLines.slice(0, hit.startLine),
-      ...renderMemoryBlock(superseded).split("\n"),
-      "",
-      ...srcLines.slice(hit.endLine),
-    ]
-      .join("\n")
-      .replace(/\n{3,}/g, "\n\n")
-      .trimEnd() + "\n";
+    const srcWithSuperseded = spliceLinesCleanly(
+      srcLines,
+      hit.startLine,
+      hit.endLine,
+      renderMemoryBlock(superseded).split("\n"),
+    );
 
     if (sameFile) {
       // Single atomic write: mark old superseded AND prepend new replacement
@@ -956,17 +1058,8 @@ export async function deleteMemory(
 
     const date = todayIso();
     const lines = lf.split("\n");
-    const nextLines = [
-      ...lines.slice(0, hit.startLine),
-      ...lines.slice(hit.endLine),
-    ];
-    const nextMd = applyEol(
-      bumpFrontmatterUpdated(
-        nextLines.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n",
-        date,
-      ),
-      eol,
-    );
+    const spliced = spliceLinesCleanly(lines, hit.startLine, hit.endLine, []);
+    const nextMd = applyEol(bumpFrontmatterUpdated(spliced, date), eol);
     await writeTextAtomic(located.absPath, nextMd);
     return hit.memory;
   });

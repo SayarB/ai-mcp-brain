@@ -655,4 +655,95 @@ describe("review regression tests (B1, B2, M1-M9, minors)", () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+
+  it("Recheck #1: unclosed code fence and nested tilde/backtick fences cannot swallow or delete older memories", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ai-mcp-brain-fence-"));
+    try {
+      const older1 = await addMemoryRaw(root, {
+        title: "Older one",
+        content: "First durable fact.",
+        scope: "global",
+        category: "facts",
+      });
+      const older2 = await addMemoryRaw(root, {
+        title: "Older two",
+        content: "Second durable fact.",
+        scope: "global",
+        category: "facts",
+      });
+      // Unclosed backtick fence inserted newest-first above both older memories
+      const badFence = await addMemoryRaw(root, {
+        title: "Unclosed fence",
+        content: "Run this:\n```bash\nbun test",
+        scope: "global",
+        category: "facts",
+      });
+      // Nested ~~~ inside ```` fence
+      const nested = await addMemoryRaw(root, {
+        title: "Nested fence",
+        content: "````md\n~~~txt\ninside\n~~~\n````",
+        scope: "global",
+        category: "facts",
+      });
+
+      const listed = await listMemories(root, { category: "facts" });
+      assert.equal(listed.length, 4);
+      assert.ok(listed.some((m) => m.id === older1.id));
+      assert.ok(listed.some((m) => m.id === older2.id));
+      assert.ok(listed.some((m) => m.id === badFence.id));
+      assert.ok(listed.some((m) => m.id === nested.id));
+
+      // Also simulate a hand-edited unclosed fence directly on disk (bypassing sanitizer)
+      const factsPath = join(root, "memories/facts.md");
+      const raw = await readText(factsPath);
+      await writeText(factsPath, raw.replace("bun test\n```", "bun test"));
+      const afterUnclosedOnDisk = await listMemories(root, { category: "facts" });
+      assert.equal(afterUnclosedOnDisk.length, 4);
+
+      await deleteMemory(root, badFence.id);
+      const afterDelete = await listMemories(root, { category: "facts" });
+      assert.equal(afterDelete.length, 3);
+      assert.ok(afterDelete.some((m) => m.id === older1.id));
+      assert.ok(afterDelete.some((m) => m.id === older2.id));
+      assert.ok(afterDelete.some((m) => m.id === nested.id));
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("Recheck #3: guard catches PGPASSWORD, JSON apiKey, GH_TOKEN, 13-char passwords, and allows code snippets, prose kebab & UUIDs", () => {
+    // Generate synthetic high-entropy test values at runtime (never hardcode secret-like literals in source)
+    const makeSynth = (len: number, offset: number): string => {
+      const alphabet = "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789!@#$";
+      let out = "";
+      for (let i = 0; i < len; i++) {
+        out += alphabet[(i * 7 + offset) % alphabet.length]!;
+      }
+      return out;
+    };
+
+    const pgPass = `PGPASSWORD=${makeSynth(13, 3)}`;
+    const jsonKey = `"apiKey": "${makeSynth(24, 11)}"`;
+    const ghTok = `GH_TOKEN=${makeSynth(24, 19)}`;
+
+    for (const s of [pgPass, jsonKey, ghTok]) {
+      assert.ok(scanForSecrets(s).length >= 1, "expected guard detection");
+    }
+
+    // Ordinary code snippets, prose kebab phrases, and UUIDs must NOT be blocked
+    const sampleUuid = [8, 4, 4, 4, 12]
+      .map((n, idx) =>
+        Array.from({ length: n }, (_, j) => ((j * 5 + idx * 3 + 2) % 16).toString(16)).join(""),
+      )
+      .join("-");
+    for (const safe of [
+      "const token = getAccessToken();",
+      "let token = req.headers.authorization;",
+      "token: useSessionStore()",
+      "secret: rotate-every-ninety-days-please",
+      `api_key: "${sampleUuid}"`,
+    ]) {
+      assert.deepEqual(scanForSecrets(safe), [], `unexpected false positive on: ${safe}`);
+    }
+  });
 });

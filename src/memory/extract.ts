@@ -154,9 +154,21 @@ async function loadVerifiedCachedMemoryVectors(
           if (!id || result.has(id)) continue;
           const mem = memMap.get(id);
           if (!mem) continue;
-          // Verify cached chunk matches current `updated` timestamp AND current body prefix + tail
+          // Verify cached chunk matches current metadata (title, category, tags, updated) AND body
           const updMatch = row.content.match(/<!--\s*mem:[^\n]*?\bupdated=([^\s<>]+)/);
+          const catMatch = row.content.match(/<!--\s*mem:[^\n]*?\bcategory=([^\s<>]+)/);
+          const tagsMatch = row.content.match(/<!--\s*mem:[^\n]*?\btags=([^\s<>]+)/);
+          const expectedTags = mem.tags.join(",");
           if (updMatch?.[1] !== mem.updated) continue;
+          if (catMatch?.[1] !== mem.category) continue;
+          if ((tagsMatch?.[1] ?? "") !== expectedTags) continue;
+          if (
+            !row.content
+              .split(/\r?\n/)
+              .some((l) => l.trim() === `### ${mem.title}`)
+          ) {
+            continue;
+          }
           const bodyHead = mem.content.slice(0, 120).trim();
           const bodyTail = mem.content.slice(-80).trim();
           if (

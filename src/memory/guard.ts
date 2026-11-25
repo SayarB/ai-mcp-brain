@@ -140,9 +140,37 @@ const HIGH_CONFIDENCE_PATTERNS: SecretPattern[] = [
 const CREDENTIALED_URL_RE =
   /\b(?:https?|postgres(?:ql)?|mysql|mongodb(?:\+srv)?|rediss?|amqps?|s?ftps?|ssh):\/\/([^/\s:@]{0,64}):([^/\s@]{4,128})@([^\s/]+)/gi;
 
-// Matches bare or prefixed env keys like OPENAI_API_KEY=..., DB_PASSWORD=..., AWS_SECRET_ACCESS_KEY=..., _authToken=...
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const PROSE_KEBAB_RE = /^[a-z]+(?:-[a-z]+){2,}$/;
+const DOTTED_IDENT_RE = /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+$/;
+const PLAIN_IDENT_RE = /^[A-Za-z_$][A-Za-z_$]+$/;
+
+function looksLikeSecretValue(val: string): boolean {
+  if (isAssignmentPlaceholder(val)) return false;
+  if (UUID_RE.test(val)) return false;
+  // Reject code expressions (function calls, dotted property paths, plain camelCase/PascalCase identifiers)
+  if (val.includes("(") || val.includes(")")) return false;
+  if (DOTTED_IDENT_RE.test(val)) return false;
+  if (PLAIN_IDENT_RE.test(val)) return false;
+  // Pure lowercase kebab-case prose phrases like `rotate-every-ninety-days-please` are not secrets
+  if (PROSE_KEBAB_RE.test(val)) return false;
+  const hasUpper = /[A-Z]/.test(val);
+  const hasLower = /[a-z]/.test(val);
+  const hasDigit = /[0-9]/.test(val);
+  const hasSymbol = /[^A-Za-z0-9]/.test(val);
+  const classCount =
+    Number(hasUpper) + Number(hasLower) + Number(hasDigit) + Number(hasSymbol);
+  const entropy = shannonEntropy(val);
+  if (val.length >= 16) return entropy >= 3.2 && classCount >= 2;
+  // 12–15 char passwords/tokens require stronger mixed-character entropy
+  if (val.length >= 12) return entropy >= 3.3 && classCount >= 3;
+  return false;
+}
+
+// Matches bare, prefixed (OPENAI_API_KEY, PGPASSWORD, GH_TOKEN), and JSON-quoted ("apiKey": "...") assignments
 const ASSIGNMENT_RE =
-  /(?:^|[^A-Za-z0-9_])(?:[A-Za-z0-9_]{1,40}_)?(?:api[_-]?key|api[_-]?secret|access[_-]?token|auth[_-]?token|refresh[_-]?token|client[_-]?secret|private[_-]?key|secret[_-]?access[_-]?key|password|passwd|secret[_-]?key|secret)\s*[:=]\s*["'`]?([^\s"'`,;]{12,160})["'`]?/gi;
+  /(?:^|[^A-Za-z0-9_])["']?(?:[A-Za-z0-9_]{1,40}_|pg)?(?:api[_-]?key|api[_-]?secret|access[_-]?token|auth[_-]?token|refresh[_-]?token|client[_-]?secret|private[_-]?key|secret[_-]?access[_-]?key|password|passwd|secret[_-]?key|secret|token)["']?\s*[:=]\s*["'`]?([^\s"'`,;{}[\]]{12,160})["'`]?/gi;
 
 const BEARER_RE = /\bAuthorization\s*:\s*Bearer\s+([A-Za-z0-9._~+/-]{20,}=*)/gi;
 
@@ -186,8 +214,7 @@ export function scanForSecrets(...texts: (string | undefined | null)[]): SecretF
 
   for (const m of combined.matchAll(ASSIGNMENT_RE)) {
     const val = m[1] ?? "";
-    if (isAssignmentPlaceholder(val)) continue;
-    if (val.length >= 16 && shannonEntropy(val) >= 3.2) {
+    if (looksLikeSecretValue(val)) {
       add("secret-assignment", "High-entropy credential assignment");
     }
   }
