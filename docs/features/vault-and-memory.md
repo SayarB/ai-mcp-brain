@@ -61,6 +61,15 @@ Agent asks if scope is unclear, then `remember` with `scope=project`, `project=<
 
 → `vault_info` → expect `readable: true`.
 
+## Choosing the right write tool
+
+| What you are storing | Tool | Where it lands |
+|----------------------|------|----------------|
+| Standing soft/hard **process** rules for actions (coding, commit, PR review, git) | `upsert_guidance` | `suggestions/` or `instructions/` |
+| **Atomic, ID-tracked facts** (profile, non-action preferences, evolvable decisions/gotchas that may be superseded) | `add_memory` / `supersede_memory` | `memories/<category>.md` or `projects/<slug>/memories.md` |
+| **Long-form notes** (project pack prose, cross-repo patterns, inbox captures) | `remember` | `projects/<slug>/`, `patterns/`, `inbox/` |
+| **Tools / SaaS** | `track_tool` | `stack/catalog/` + `stack/recent.md` |
+
 ## Edge cases
 
 - Prefer a normal home path for the vault; iCloud / sandboxed cloud folders can yield `EPERM`  

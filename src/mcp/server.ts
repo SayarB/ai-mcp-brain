@@ -319,19 +319,34 @@ export function createBrainServer(): McpServer {
           project,
           limit ?? 20,
         );
+        const packNotes = notes.filter((n) => !/^projects\/[^/]+\/memories\.md$/.test(n.path));
+        const activeMemories = await listMemories(vault, {
+          scope: "project",
+          project,
+          status: "active",
+          limit: 20,
+        });
         const ensuredLine = ensured.length
           ? `Created: ${ensured.join(", ")}\n`
           : "";
-        if (!notes.length) {
+        if (!packNotes.length && !activeMemories.length) {
           return textResult(
             `${ensuredLine}No project notes yet for: ${project}`,
           );
         }
-        const body = notes
-          .map((n) => `---\n${noteToTailSummary(n, 2400)}`)
-          .join("\n\n");
+        const parts = packNotes.map((n) => `---\n${noteToTailSummary(n, 2400)}`);
+        if (activeMemories.length) {
+          const memBlock = activeMemories
+            .map(
+              (m) =>
+                `- [${m.id}] **${m.title}** (${m.category}, ${m.updated}): ${m.content.replace(/\s+/g, " ").slice(0, 240)}`,
+            )
+            .join("\n");
+          parts.push(`---\n## Active Atomic Memories (${activeMemories.length})\n\n${memBlock}`);
+        }
+        const body = parts.join("\n\n");
         return textResult(
-          `Vault: ${vault}\nProject (git repo): ${project}\n${ensuredLine}Notes: ${notes.length}\n\n${body}`,
+          `Vault: ${vault}\nProject (git repo): ${project}\n${ensuredLine}Notes: ${packNotes.length}, Active memories: ${activeMemories.length}\n\n${body}`,
         );
       } catch (err) {
         return errorResult(err);
@@ -339,17 +354,17 @@ export function createBrainServer(): McpServer {
     },
   );
 
-  // --- Atomic memory tools (OpenMemory-compatible, Markdown-backed) ---
+  // --- Atomic memory tools (Markdown-backed) ---
 
   server.registerTool(
     "add_memory",
     {
       title: "Add atomic memory",
       description:
-        "Store an atomic, ID-tracked memory in Markdown (memories/<category>.md or projects/<slug>/memories.md) with write-time secret scanning and automatic deduplication. Pass supersede_id to replace an outdated memory while preserving temporal lineage.",
+        "Store an atomic, ID-tracked memory in Markdown (memories/<category>.md or projects/<slug>/memories.md) with write-time secret scanning and automatic deduplication. Pass supersede_id to replace an outdated memory while preserving temporal lineage (inherits scope/project from the old memory; dedupe is skipped when supersede_id is set).",
       inputSchema: {
-        title: z.string().min(1).describe("Concise memory title"),
-        content: z.string().min(1).describe("Factual memory body (no secrets)"),
+        title: z.string().trim().min(1).describe("Concise single-line memory title"),
+        content: z.string().trim().min(1).describe("Factual memory body (no secrets)"),
         scope: z
           .enum(["global", "project"])
           .optional()
@@ -369,8 +384,10 @@ export function createBrainServer(): McpServer {
         tags: z.array(z.string()).optional().describe("Optional tags"),
         supersede_id: z
           .string()
+          .trim()
+          .min(1)
           .optional()
-          .describe("Existing memory ID to atomically supersede"),
+          .describe("Existing active memory ID to atomically supersede (inherits scope/project)"),
         dedupe: z
           .enum(["dedupe", "force"])
           .optional()
@@ -405,7 +422,7 @@ export function createBrainServer(): McpServer {
       description:
         "Hybrid semantic + lexical search over atomic memories. Defaults to status=active so superseded memories never pollute recall.",
       inputSchema: {
-        query: z.string().min(1).describe("Search query"),
+        query: z.string().trim().min(1).describe("Search query"),
         limit: z.number().int().min(1).max(50).optional().describe("Max results (default 10)"),
         mode: z.enum(["hybrid", "fts", "vector"]).optional().describe("Retrieval mode (default hybrid)"),
         scope: z.enum(["global", "project"]).optional(),
@@ -504,9 +521,9 @@ export function createBrainServer(): McpServer {
       description:
         "Surgically update an existing atomic memory by ID (preserves ID & created date, bumps updated, runs secret guard).",
       inputSchema: {
-        id: z.string().min(1).describe("Memory ID (e.g. m_a1b2c3d4)"),
-        title: z.string().optional(),
-        content: z.string().optional(),
+        id: z.string().trim().min(1).describe("Memory ID (e.g. m_a1b2c3d4)"),
+        title: z.string().trim().min(1).optional(),
+        content: z.string().trim().min(1).optional(),
         tags: z.array(z.string()).optional(),
         category: z.enum(MEMORY_CATEGORIES).optional(),
         app: z.string().optional(),
@@ -538,9 +555,9 @@ export function createBrainServer(): McpServer {
       description:
         "Replace an outdated memory ID with a new active memory, keeping the old memory in Markdown marked status=superseded with temporal lineage.",
       inputSchema: {
-        old_id: z.string().min(1).describe("Existing memory ID to mark superseded"),
-        content: z.string().min(1).describe("Updated memory content"),
-        title: z.string().optional().describe("Optional new title (defaults to previous title)"),
+        old_id: z.string().trim().min(1).describe("Existing active memory ID to mark superseded"),
+        content: z.string().trim().min(1).describe("Updated memory content"),
+        title: z.string().trim().min(1).optional().describe("Optional new title (defaults to previous title)"),
         tags: z.array(z.string()).optional(),
         category: z.enum(MEMORY_CATEGORIES).optional(),
         app: z.string().optional(),
@@ -571,7 +588,7 @@ export function createBrainServer(): McpServer {
       description:
         "Permanently remove an atomic memory block by ID from its Markdown file.",
       inputSchema: {
-        id: z.string().min(1).describe("Memory ID to delete"),
+        id: z.string().trim().min(1).describe("Memory ID to delete"),
       },
     },
     async ({ id }) => {

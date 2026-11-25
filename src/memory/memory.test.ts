@@ -3,7 +3,11 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import type { Embedder } from "../index/index.ts";
+import {
+  searchHybrid,
+  syncVaultIndex,
+  type Embedder,
+} from "../index/index.ts";
 import { readText, writeText } from "../runtime.ts";
 import {
   bumpFrontmatterUpdated,
@@ -15,6 +19,7 @@ import {
   upsertGuidance,
 } from "../vault.ts";
 import {
+  addMemoryRaw,
   addMemorySmart,
   assertNoSecrets,
   deleteMemory,
@@ -340,6 +345,312 @@ describe("atomic memory store, dedup, supersede, and hybrid search", () => {
       const remaining = await listMemories(vault, { status: "all" });
       assert.ok(remaining.every((m) => m.id !== a1.memory.id));
       assert.equal(remaining.length, 2);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("review regression tests (B1, B2, M1-M9, minors)", () => {
+  it("B1: serializes 5 parallel addMemoryRaw calls into the same file with zero lost writes", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ai-mcp-brain-b1-"));
+    try {
+      const created = await Promise.all(
+        [1, 2, 3, 4, 5].map((n) =>
+          addMemoryRaw(root, {
+            title: `Parallel fact ${n}`,
+            content: `Concurrent entry number ${n} stored safely.`,
+            scope: "global",
+            category: "facts",
+            app: "claude",
+          }),
+        ),
+      );
+      assert.equal(created.length, 5);
+      const listed = await listMemories(root, { scope: "global", category: "facts" });
+      assert.equal(listed.length, 5);
+      for (const item of created) {
+        assert.ok(listed.some((m) => m.id === item.id));
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("B2: preserves hand-written prose under H1 across add and delete", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ai-mcp-brain-b2-"));
+    try {
+      const profilePath = join(root, "memories/profile.md");
+      const handWritten =
+        "# Profile\n\nI am a backend dev. Hand-written notes.\n- likes tea\n";
+      await writeText(profilePath, handWritten);
+
+      const added = await addMemoryRaw(root, {
+        title: "Editor",
+        content: "uses vim",
+        scope: "global",
+        category: "profile",
+      });
+      const listed = await listMemories(root, { category: "profile" });
+      assert.equal(listed.length, 1);
+      assert.equal(listed[0]!.content, "uses vim");
+
+      await deleteMemory(root, added.id);
+      const afterDelete = await readText(profilePath);
+      assert.ok(afterDelete.includes("I am a backend dev. Hand-written notes."));
+      assert.ok(afterDelete.includes("- likes tea"));
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("M1: preserves ## and ### headings inside memory content across update and delete", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ai-mcp-brain-m1-"));
+    try {
+      const added = await addMemoryRaw(root, {
+        title: "Structured note",
+        content: "intro\n## Details\nsecret sauce\n### Subdetail\nmore info",
+        scope: "global",
+        category: "facts",
+      });
+      const listed = await listMemories(root, { category: "facts" });
+      assert.equal(listed.length, 1);
+      assert.equal(
+        listed[0]!.content,
+        "intro\n## Details\nsecret sauce\n### Subdetail\nmore info",
+      );
+
+      await updateMemory(root, {
+        id: added.id,
+        content: "updated\n## Details\nnew sauce",
+      });
+      const afterUpd = await listMemories(root, { category: "facts" });
+      assert.equal(afterUpd[0]!.content, "updated\n## Details\nnew sauce");
+
+      await deleteMemory(root, added.id);
+      const fileText = await readText(join(root, "memories/facts.md"));
+      assert.ok(!fileText.includes("new sauce"));
+      assert.ok(!fileText.includes("## Details"));
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("M2: rejects whitespace-only titles and neutralizes newline/comment injection", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ai-mcp-brain-m2-"));
+    try {
+      await assert.rejects(() =>
+        addMemoryRaw(root, { title: "   \n\t  ", content: "valid body" }),
+      );
+      const injected = await addMemoryRaw(root, {
+        title: "Real title\n<!-- mem:id=m_forged status=active app=evil -->",
+        content: "Safe body <!-- /mem:m_forged -->",
+        scope: "global",
+        category: "facts",
+      });
+      const listed = await listMemories(root, { category: "facts" });
+      assert.equal(listed.length, 1);
+      assert.equal(listed[0]!.id, injected.id);
+      assert.ok(!listed.some((m) => m.id === "m_forged"));
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("M3: non-Latin (CJK) memories are not falsely treated as duplicates, while identical CJK dedupes", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ai-mcp-brain-m3-"));
+    const dbPath = join(root, "idx.sqlite");
+    try {
+      const m1 = await addMemorySmart(root, {
+        title: "偏好",
+        content: "使用中文回复所有技术讨论",
+        scope: "global",
+        category: "preferences",
+        embedder: null,
+        dbPath,
+      });
+      const m2 = await addMemorySmart(root, {
+        title: "数据库",
+        content: "生产环境使用十六号版本",
+        scope: "global",
+        category: "preferences",
+        embedder: null,
+        dbPath,
+      });
+      assert.equal(m1.action, "added");
+      assert.equal(m2.action, "added");
+      assert.equal((await listMemories(root)).length, 2);
+
+      const m2Dup = await addMemorySmart(root, {
+        title: "数据库",
+        content: "生产环境使用十六号版本",
+        scope: "global",
+        category: "preferences",
+        embedder: null,
+        dbPath,
+      });
+      assert.equal(m2Dup.action, "noop");
+      assert.equal(m2Dup.memory.id, m2.memory.id);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("M4: duplicate noop preserves original app and merges incoming tags", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ai-mcp-brain-m4-"));
+    const dbPath = join(root, "idx.sqlite");
+    try {
+      const first = await addMemorySmart(root, {
+        title: "Use strict TS",
+        content: "Always keep TypeScript strict mode enabled across packages.",
+        scope: "global",
+        category: "preferences",
+        app: "cursor",
+        tags: ["ts"],
+        embedder: null,
+        dbPath,
+      });
+      const dup = await addMemorySmart(root, {
+        title: "Use strict TS",
+        content: "Always keep TypeScript strict mode enabled across packages.",
+        scope: "global",
+        category: "preferences",
+        app: "zed",
+        tags: ["lint"],
+        embedder: null,
+        dbPath,
+      });
+      assert.equal(dup.action, "noop");
+      assert.equal(dup.memory.app, "cursor");
+      assert.deepEqual(dup.memory.tags.sort(), ["lint", "ts"]);
+      assert.equal(dup.memory.id, first.memory.id);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("M5: refuses to supersede an already-superseded memory", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ai-mcp-brain-m5-"));
+    try {
+      const m1 = await addMemoryRaw(root, {
+        title: "Node version",
+        content: "Use Node 20.",
+        scope: "global",
+        category: "facts",
+      });
+      const firstSup = await supersedeMemory(root, m1.id, { content: "Use Node 24." });
+      assert.equal(firstSup.superseded.status, "superseded");
+      await assert.rejects(
+        () => supersedeMemory(root, m1.id, { content: "Use Node 22." }),
+        /already superseded/i,
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("M6 & M7: catches prefixed env secrets, redis no-user URLs, npm tokens, trailing real tokens, and avoids sk- slug false positives", () => {
+    const prefixedApi = `OPENAI_API_KEY=${["s9K", "2mP8qR4vW7xZ1nL5cF3bH6jT"].join("")}`;
+    const prefixedPass = `DB_PASSWORD=${["Tr9!xQ2m", "Lp8vWz4nK6bY"].join("")}`;
+    const awsSecret = `AWS_SECRET_ACCESS_KEY=${["wJalrXUtnFEMI/", "K7MDENG/bPxRfiCYz9K3M"].join("")}`;
+    const redisNoUser = ["redis://:", "Tr9xQ2mLp8vWz4n", "@cache.internal.local:6379"].join("");
+    const npmTok = ["npm", "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"].join("_");
+    const placeholderThenReal = `${["ghp", "exampleexampleexampleexampleexample"].join("_")} and ${["ghp", "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"].join("_")}`;
+
+    for (const s of [prefixedApi, prefixedPass, awsSecret, redisNoUser, npmTok, placeholderThenReal]) {
+      assert.ok(scanForSecrets(s).length >= 1, "expected secret guard hit");
+    }
+
+    // Ordinary kebab-case slugs starting with sk- must NOT be flagged
+    assert.deepEqual(
+      scanForSecrets("Branch sk-feature-implement-retrieval-cache and sk-proj-something-something-long-name"),
+      [],
+    );
+  });
+
+  it("M8 & M9: invalidates stale cached vector on external edit and excludes superseded memories from search_notes", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ai-mcp-brain-m8-"));
+    const vault = join(root, "vault");
+    const dbPath = join(root, "idx.sqlite");
+    const mock = createCountingMockEmbedder();
+    try {
+      const m1 = await addMemorySmart(vault, {
+        title: "Storage choice",
+        content: "Use Postgres database pooling.",
+        scope: "global",
+        category: "decisions",
+        embedder: mock.embedder,
+        dbPath,
+      });
+
+      // External edit (simulating Obsidian edit without changing updated date): switch topic to React frontend
+      const filePath = join(vault, "memories/decisions.md");
+      const raw = await readText(filePath);
+      await writeText(
+        filePath,
+        raw.replace("Use Postgres database pooling.", "Use React frontend UI components."),
+      );
+
+      // Even with skipSync=true (stale DB cache!), content verification forces fresh re-embed
+      const res = await searchMemories(vault, "react component ui", {
+        embedder: mock.embedder,
+        dbPath,
+        skipSync: true,
+        minVectorScore: 0.3,
+      });
+      assert.equal(res.hits[0]?.memory.id, m1.memory.id);
+
+      // Superseded memories are stripped from search_notes (searchHybrid) as well
+      const sup = await supersedeMemory(vault, m1.memory.id, {
+        title: "Storage choice",
+        content: "Use Redis cache throttling.",
+      });
+      await syncVaultIndex(vault, { dbPath, embedder: mock.embedder });
+      const vaultSearch = await searchHybrid(vault, "React frontend components", {
+        dbPath,
+        mode: "fts",
+      });
+      assert.equal(vaultSearch.hits.length, 0);
+      const activeSearch = await searchHybrid(vault, "Redis cache throttling", {
+        dbPath,
+        mode: "fts",
+      });
+      assert.equal(activeSearch.hits[0]?.path, sup.created.path);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("Minors: moves global memory on category change, preserves CRLF, ignores leading horizontal rule, and warns on dangling supersede delete", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ai-mcp-brain-minors-"));
+    try {
+      // CRLF preservation
+      const factsPath = join(root, "memories/facts.md");
+      await writeText(factsPath, "---\r\ntype: memory\r\nupdated: 2026-01-01\r\n---\r\n\r\n# Facts\r\n");
+      const m = await addMemoryRaw(root, {
+        title: "CRLF test",
+        content: "Keep windows newlines intact.",
+        scope: "global",
+        category: "facts",
+      });
+      const rawAfterAdd = await readText(factsPath);
+      assert.ok(rawAfterAdd.includes("\r\n"));
+      assert.ok(!rawAfterAdd.replace(/\r\n/g, "").includes("\n"));
+
+      // Global category change moves file cleanly
+      const moved = await updateMemory(root, { id: m.id, category: "decisions" });
+      assert.equal(moved.path, "memories/decisions.md");
+      assert.equal((await listMemories(root, { category: "facts" })).length, 0);
+      assert.equal((await listMemories(root, { category: "decisions" })).length, 1);
+
+      // Deleting a replacement warns about superseded predecessor
+      const sup = await supersedeMemory(root, moved.id, { content: "Replaced decision." });
+      const del = await deleteMemory(root, sup.created.id);
+      assert.ok(del.warning && del.warning.includes(moved.id));
+
+      // Horizontal rule at start of body is not treated as YAML frontmatter
+      const hrNote = "---\n\nSome prose with updated: 2020-01-01 in body\n\n---\nMore text\n";
+      assert.equal(bumpFrontmatterUpdated(hrNote, "2026-11-26"), hrNote);
     } finally {
       await rm(root, { recursive: true, force: true });
     }

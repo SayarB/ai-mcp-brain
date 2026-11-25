@@ -5,6 +5,7 @@ import { assertNoSecrets } from "./memory/guard.ts";
 import {
   copyFileEnsured,
   globFiles,
+  parseYaml,
   pathExists,
   readText,
   writeText,
@@ -91,9 +92,8 @@ function stripFrontmatter(body: string): string {
   return body.slice(end + 4).replace(/^\s+/, "");
 }
 
-/** Update or insert `updated: YYYY-MM-DD` inside YAML frontmatter without disturbing body content. */
+/** Update or insert `updated: YYYY-MM-DD` inside valid YAML frontmatter (ignoring Markdown horizontal rules). */
 export function bumpFrontmatterUpdated(markdown: string, date: string): string {
-  if (!markdown.startsWith("---")) return markdown;
   const match = markdown.match(/^(---\r?\n)([\s\S]*?)(\r?\n---(?:\r?\n|$))/);
   if (!match) return markdown;
   const open = match[1]!;
@@ -101,11 +101,27 @@ export function bumpFrontmatterUpdated(markdown: string, date: string): string {
   const close = match[3]!;
   const rest = markdown.slice(match[0].length);
 
+  // Guard against Markdown files starting with a `---` horizontal rule rather than YAML frontmatter
+  if (/^\s*\r?\n/.test(fmBody)) return markdown;
+  try {
+    const parsed = parseYaml<unknown>(fmBody);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return markdown;
+    }
+    const keys = Object.keys(parsed as Record<string, unknown>);
+    if (!keys.length || !keys.every((k) => /^[A-Za-z0-9_-]+$/.test(k))) {
+      return markdown;
+    }
+  } catch {
+    return markdown;
+  }
+
   if (/^updated\s*:/m.test(fmBody)) {
     const nextFm = fmBody.replace(/^updated\s*:.*$/m, `updated: ${date}`);
     return `${open}${nextFm}${close}${rest}`;
   }
-  return `${open}${fmBody.trimEnd()}\nupdated: ${date}${close}${rest}`;
+  const eol = open.includes("\r\n") ? "\r\n" : "\n";
+  return `${open}${fmBody.trimEnd()}${eol}updated: ${date}${close}${rest}`;
 }
 
 function normalizeIndexKey(raw: string): string {
@@ -589,7 +605,7 @@ export async function vaultInfo(vaultPath: string): Promise<{
 export function noteToSummary(note: VaultNote, maxBody = 16000): string {
   const body =
     note.body.length > maxBody
-      ? `${note.body.slice(0, maxBody)}\n\n…(truncated at ${maxBody} of ${note.body.length} chars; pass section or tail=true to read further)`
+      ? `${note.body.slice(0, maxBody)}\n\n…(truncated at ${maxBody} of ${note.body.length} chars)`
       : note.body;
   return `path: ${note.path}\ntitle: ${note.title}\n\n${body}`;
 }

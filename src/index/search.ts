@@ -72,11 +72,12 @@ const STOPWORDS = new Set([
   "which", "who", "why", "will", "with", "would", "you", "your",
 ]);
 
-/** Tokenize a user query into safe FTS5 terms (no operator injection or syntax errors). */
+/** Tokenize a user query into safe Unicode FTS5 terms (no operator injection or syntax errors). */
 export function tokenizeForFts(query: string): string[] {
   const all = query
+    .normalize("NFKC")
     .toLowerCase()
-    .replace(/[^a-z0-9_]+/g, " ")
+    .replace(/[^\p{L}\p{N}_]+/gu, " ")
     .split(/\s+/)
     .map((t) => t.trim())
     .filter((t) => t.length >= 2);

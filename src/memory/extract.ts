@@ -1,7 +1,8 @@
 /**
  * Smart atomic memory operations:
- * - Semantic + lexical deduplication on `addMemorySmart`
+ * - Unicode-safe semantic + lexical deduplication on `addMemorySmart`
  * - Conflict candidate surfacing (`similarExisting`)
+ * - Content-verified SQLite vector cache reuse (never uses stale vectors after external edits)
  * - Scoped hybrid search over atomic memories (`searchMemories`) with status filtering (active by default)
  */
 import {
@@ -19,8 +20,10 @@ import { assertNoSecrets } from "./guard.ts";
 import {
   addMemoryRaw,
   listMemories,
+  sanitizeMemoryContent,
+  sanitizeMemoryTitle,
   supersedeMemory,
-  updateMemory,
+  touchMemory,
   type AddMemoryRawInput,
   type AtomicMemory,
   type MemoryCategory,
@@ -32,7 +35,7 @@ export type DedupeMode = "dedupe" | "force";
 
 export type AddMemorySmartInput = AddMemoryRawInput & {
   dedupe?: DedupeMode;
-  /** If set, atomically supersedes this existing memory ID instead of creating an unlinked entry. */
+  /** If set, atomically supersedes this existing memory ID (inherits scope/project from the old memory). */
   supersedeId?: string;
   /** Optional custom/null embedder (defaults to local ONNX embedder). */
   embedder?: Embedder | null;
@@ -80,10 +83,12 @@ export type MemorySearchHit = {
   vectorScore: number | null;
 };
 
+/** Unicode-safe normalization (preserves Latin, CJK, Hindi, Cyrillic, Arabic, digits). */
 function normalizeText(text: string): string {
   return text
+    .normalize("NFKC")
     .toLowerCase()
-    .replace(/[^a-z0-9\s]+/g, " ")
+    .replace(/[^\p{L}\p{N}\s]+/gu, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -101,10 +106,24 @@ function jaccardSimilarity(a: string, b: string): number {
 }
 
 /**
- * Load cached Float32 embeddings for atomic memories from the disposable SQLite index
- * (matching `<!-- mem:id=<id> ... -->` inside indexed chunks), avoiding redundant re-embedding.
+ * Canonical embedding text matching how `syncVaultIndex` embeds a memory chunk,
+ * so fresh and cached vectors live in the exact same text distribution.
  */
-async function loadCachedMemoryVectors(
+function formatMemoryForEmbedding(mem: {
+  title: string;
+  content: string;
+  category: MemoryCategory;
+  tags: string[];
+}): string {
+  const tagLine = mem.tags.length ? ` [${mem.tags.join(", ")}]` : "";
+  return `${mem.title} — ${mem.category}${tagLine}\n${mem.content}`;
+}
+
+/**
+ * Load cached Float32 embeddings from SQLite ONLY when the cached chunk's metadata and body
+ * still match the current Markdown memory (prevents stale vectors after external Obsidian/CLI edits).
+ */
+async function loadVerifiedCachedMemoryVectors(
   vaultPath: string,
   memories: AtomicMemory[],
   embedModel: string,
@@ -115,9 +134,14 @@ async function loadCachedMemoryVectors(
   try {
     const { db } = await openIndexDb(vaultPath, { dbPath });
     try {
-      const files = [...new Set(memories.map((m) => m.path))];
-      const idSet = new Set(memories.map((m) => m.id));
-      for (const filePath of files) {
+      const byFile = new Map<string, Map<string, AtomicMemory>>();
+      for (const m of memories) {
+        const map = byFile.get(m.path) ?? new Map<string, AtomicMemory>();
+        map.set(m.id, m);
+        byFile.set(m.path, map);
+      }
+
+      for (const [filePath, memMap] of byFile.entries()) {
         const rows = db
           .prepare(
             `SELECT content, embedding FROM chunks
@@ -125,9 +149,20 @@ async function loadCachedMemoryVectors(
           )
           .all<{ content: string; embedding: Uint8Array }>(filePath, embedModel);
         for (const row of rows) {
-          const m = row.content.match(/<!--\s*mem:[^\n]*?\bid=([^\s<>]+)/);
-          const id = m?.[1];
-          if (id && idSet.has(id) && !result.has(id)) {
+          const idMatch = row.content.match(/<!--\s*mem:[^\n]*?\bid=([^\s<>]+)/);
+          const id = idMatch?.[1];
+          if (!id || result.has(id)) continue;
+          const mem = memMap.get(id);
+          if (!mem) continue;
+          // Verify cached chunk matches current `updated` timestamp AND current body prefix + tail
+          const updMatch = row.content.match(/<!--\s*mem:[^\n]*?\bupdated=([^\s<>]+)/);
+          if (updMatch?.[1] !== mem.updated) continue;
+          const bodyHead = mem.content.slice(0, 120).trim();
+          const bodyTail = mem.content.slice(-80).trim();
+          if (
+            (!bodyHead || row.content.includes(bodyHead)) &&
+            (!bodyTail || row.content.includes(bodyTail))
+          ) {
             result.set(id, decodeEmbedding(row.embedding));
           }
         }
@@ -136,7 +171,7 @@ async function loadCachedMemoryVectors(
       db.close();
     }
   } catch {
-    /* ignore cache read error; caller will embed directly */
+    /* ignore cache read error; caller embeds directly */
   }
   return result;
 }
@@ -147,7 +182,7 @@ async function resolveMemoryVectors(
   embedder: Embedder,
   dbPath?: string,
 ): Promise<Map<string, Float32Array>> {
-  const cached = await loadCachedMemoryVectors(
+  const cached = await loadVerifiedCachedMemoryVectors(
     vaultPath,
     memories,
     embedder.model,
@@ -156,7 +191,7 @@ async function resolveMemoryVectors(
   const missing = memories.filter((m) => !cached.has(m.id));
   if (missing.length > 0) {
     const vecs = await embedder.embed(
-      missing.map((m) => `${m.title} [${m.category} ${m.tags.join(" ")}]\n${m.content}`),
+      missing.map((m) => formatMemoryForEmbedding(m)),
       "document",
     );
     for (let i = 0; i < missing.length; i++) {
@@ -168,33 +203,40 @@ async function resolveMemoryVectors(
 
 async function findSimilarMemories(
   vaultPath: string,
-  incomingText: string,
+  incoming: { title: string; content: string; category: MemoryCategory; tags: string[] },
   existing: AtomicMemory[],
   embedder: Embedder | null,
   dbPath?: string,
 ): Promise<{ scores: { memory: AtomicMemory; sim: number }[]; usedVectors: boolean }> {
   if (!existing.length) return { scores: [], usedVectors: false };
 
-  const incomingNorm = normalizeText(incomingText);
-  const incomingBody = normalizeText(
-    incomingText.split("\n").slice(1).join("\n") || incomingText,
-  );
-  // Check exact normalized match first
-  const exactHit = existing.find(
-    (m) =>
-      normalizeText(`${m.title} ${m.content}`) === incomingNorm ||
-      (incomingBody.length >= 12 && normalizeText(m.content) === incomingBody),
-  );
-  if (exactHit) {
-    return {
-      scores: [{ memory: exactHit, sim: 1.0 }],
-      usedVectors: false,
-    };
+  const incomingFullNorm = normalizeText(`${incoming.title} ${incoming.content}`);
+  const incomingBodyNorm = normalizeText(incoming.content);
+
+  // Exact normalized check — require non-trivial length so empty/punctuation-only strings never collide
+  if (incomingFullNorm.length >= 4) {
+    const exactHit = existing.find((m) => {
+      const mFull = normalizeText(`${m.title} ${m.content}`);
+      const mBody = normalizeText(m.content);
+      return (
+        (mFull.length >= 4 && mFull === incomingFullNorm) ||
+        (incomingBodyNorm.length >= 12 && mBody === incomingBodyNorm)
+      );
+    });
+    if (exactHit) {
+      return {
+        scores: [{ memory: exactHit, sim: 1.0 }],
+        usedVectors: false,
+      };
+    }
   }
 
   if (embedder) {
     try {
-      const [qVec] = await embedder.embed([incomingText], "document");
+      const [qVec] = await embedder.embed(
+        [formatMemoryForEmbedding(incoming)],
+        "document",
+      );
       const vecMap = await resolveMemoryVectors(vaultPath, existing, embedder, dbPath);
       if (qVec) {
         const scored = existing
@@ -213,6 +255,7 @@ async function findSimilarMemories(
     }
   }
 
+  const incomingText = `${incoming.title} ${incoming.content}`;
   const scored = existing.map((memory) => ({
     memory,
     sim:
@@ -228,19 +271,21 @@ export async function addMemorySmart(
   vaultPath: string,
   input: AddMemorySmartInput,
 ): Promise<AddMemorySmartResult> {
-  assertNoSecrets(input.title, input.content);
+  const title = sanitizeMemoryTitle(input.title);
+  const content = sanitizeMemoryContent(input.content);
+  assertNoSecrets(title, content);
 
   const embedder =
     input.embedder !== undefined ? input.embedder : resolveDefaultEmbedder();
 
-  // Explicit supersede path
+  // Explicit supersede path (inherits scope/project from the superseded memory)
   if (input.supersedeId) {
     const { superseded, created } = await supersedeMemory(
       vaultPath,
       input.supersedeId,
       {
-        title: input.title,
-        content: input.content,
+        title,
+        content,
         tags: input.tags,
         app: input.app,
         category: input.category,
@@ -262,6 +307,8 @@ export async function addMemorySmart(
 
   const scope: MemoryScope =
     input.scope ?? (input.project ? "project" : "global");
+  const category: MemoryCategory =
+    input.category ?? (scope === "project" ? "decisions" : "facts");
   const resolvedProject =
     scope === "project" && input.project
       ? await resolveProjectSlug(vaultPath, input.project)
@@ -277,10 +324,9 @@ export async function addMemorySmart(
       status: "active",
     });
 
-    const incomingText = `${input.title.trim()}\n${input.content.trim()}`;
     const { scores, usedVectors } = await findSimilarMemories(
       vaultPath,
-      incomingText,
+      { title, content, category, tags: input.tags ?? [] },
       existing,
       embedder,
       input.dbPath,
@@ -292,11 +338,13 @@ export async function addMemorySmart(
 
     const top = scores[0];
     if (top && top.sim >= dupThreshold) {
-      // Refresh `updated` timestamp on exact/near-duplicate so recency stays fresh
-      const refreshed = await updateMemory(vaultPath, {
-        id: top.memory.id,
-        app: input.app,
-      });
+      // Preserve original `app`, bump `updated`, merge any new tags, and sync index
+      const refreshed = await touchMemory(vaultPath, top.memory.id, input.tags);
+      if (!input.skipSync) {
+        await syncVaultIndex(vaultPath, { dbPath: input.dbPath, embedder }).catch(
+          () => {},
+        );
+      }
       const dup: SimilarCandidate = {
         id: refreshed.id,
         title: refreshed.title,
@@ -329,7 +377,10 @@ export async function addMemorySmart(
 
   const created = await addMemoryRaw(vaultPath, {
     ...input,
+    title,
+    content,
     scope,
+    category,
     project: resolvedProject ?? input.project,
   });
 
@@ -352,7 +403,7 @@ export async function addMemorySmart(
 }
 
 /**
- * Search atomic memories with hybrid FTS5 + vector similarity + strict status/category/app filters.
+ * Search atomic memories with hybrid lexical + vector similarity + strict status/category/app filters.
  * Defaults to `status: "active"` so superseded memories never pollute active recall.
  */
 export async function searchMemories(
@@ -384,7 +435,7 @@ export async function searchMemories(
     };
   }
 
-  // Channel 1: Lexical BM25-like token match over atomic memory entries
+  // Channel 1: Lexical match over atomic memory entries (Unicode-safe)
   const queryTokens = tokenizeForFts(query);
   const ftsScored: { memory: AtomicMemory; score: number }[] = [];
 
@@ -395,7 +446,10 @@ export async function searchMemories(
       let matchedTokens = 0;
       let rawScore = 0;
       for (const tok of queryTokens) {
-        const stem = tok.length > 4 ? tok.slice(0, Math.max(4, tok.length - 2)) : tok;
+        const stem =
+          /^[a-z]+$/.test(tok) && tok.length > 4
+            ? tok.slice(0, Math.max(4, tok.length - 2))
+            : tok;
         if (hay.includes(stem)) {
           matchedTokens++;
           rawScore += 2;
@@ -404,7 +458,6 @@ export async function searchMemories(
       }
       const minNeeded = queryTokens.length >= 4 ? 2 : 1;
       if (matchedTokens >= minNeeded) {
-        // Bonus when all tokens match
         if (matchedTokens === queryTokens.length) rawScore += 4;
         ftsScored.push({ memory: mem, score: rawScore });
       }
@@ -412,7 +465,7 @@ export async function searchMemories(
     ftsScored.sort((a, b) => b.score - a.score);
   }
 
-  // Channel 2: Vector cosine similarity over atomic memories
+  // Channel 2: Vector cosine similarity over atomic memories (reuses content-verified SQLite cache)
   const embedder =
     requestedMode === "fts"
       ? null
@@ -499,7 +552,7 @@ export async function searchMemories(
 
   const hits: MemorySearchHit[] = [...agg.values()]
     .sort((a, b) => b.score - a.score)
-    .slice(0, limit)
+    .slice(0, Math.max(0, limit))
     .map((x) => ({
       memory: x.memory,
       score: Math.round(x.score * 10000) / 10000,

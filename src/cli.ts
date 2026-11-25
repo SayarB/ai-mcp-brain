@@ -9,6 +9,7 @@ import {
   MEMORY_CATEGORIES,
   searchMemories,
   supersedeMemory,
+  updateMemory,
   type MemoryCategory,
 } from "./memory/index.ts";
 import {
@@ -60,7 +61,7 @@ Advanced:
                           Sync or rebuild the local SQLite hybrid search index
   search <query> [--project <slug>] [--mode hybrid|fts|vector] [--limit N]
                           Run hybrid search from the terminal
-  memory <add|list|search|supersede|delete> [options]
+  memory <add|list|search|update|supersede|delete> [options]
                           Manage atomic ID-tracked memories in Markdown
   ingest                  (planned) promote external/ drops
   work-event              Append a day-log event (harness-agnostic capture)
@@ -280,6 +281,56 @@ async function cmdSearch(
   }
 }
 
+function parseOptionalPositiveInt(
+  raw: string | undefined,
+  flagName: string,
+): number | undefined {
+  if (raw === undefined) return undefined;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n <= 0) {
+    throw new Error(`Invalid --${flagName}: ${raw} (expected a positive integer)`);
+  }
+  return n;
+}
+
+function parseOptionalScope(
+  raw: string | undefined,
+): "global" | "project" | undefined {
+  if (raw === undefined) return undefined;
+  if (raw !== "global" && raw !== "project") {
+    throw new Error(`Unknown --scope: ${raw} (expected global | project)`);
+  }
+  return raw;
+}
+
+function parseOptionalStatus(
+  raw: string | undefined,
+): "active" | "superseded" | "all" | undefined {
+  if (raw === undefined) return undefined;
+  if (raw !== "active" && raw !== "superseded" && raw !== "all") {
+    throw new Error(`Unknown --status: ${raw} (expected active | superseded | all)`);
+  }
+  return raw;
+}
+
+function parseOptionalSearchMode(
+  raw: string | undefined,
+): SearchMode | undefined {
+  if (raw === undefined) return undefined;
+  if (raw !== "hybrid" && raw !== "fts" && raw !== "vector") {
+    throw new Error(`Unknown --mode: ${raw} (expected hybrid | fts | vector)`);
+  }
+  return raw;
+}
+
+function parseTagList(raw: string | undefined): string[] | undefined {
+  if (raw === undefined) return undefined;
+  return raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
 async function cmdMemory(
   positionals: string[],
   pathOverride: string | undefined,
@@ -291,18 +342,43 @@ async function cmdMemory(
   const category = flags.category as MemoryCategory | undefined;
   if (category && !(MEMORY_CATEGORIES as readonly string[]).includes(category)) {
     console.error(
-      `Unknown category: ${category} (expected ${MEMORY_CATEGORIES.join(" | ")})`,
+      `Unknown --category: ${category} (expected ${MEMORY_CATEGORIES.join(" | ")})`,
     );
     process.exitCode = 1;
     return;
   }
+
+  let scope: "global" | "project" | undefined;
+  let status: "active" | "superseded" | "all" | undefined;
+  let mode: SearchMode | undefined;
+  let limit: number | undefined;
+  try {
+    scope = parseOptionalScope(flags.scope);
+    status = parseOptionalStatus(flags.status);
+    mode = parseOptionalSearchMode(flags.mode);
+    limit = parseOptionalPositiveInt(flags.limit, "limit");
+  } catch (err) {
+    console.error(err instanceof Error ? err.message : String(err));
+    process.exitCode = 1;
+    return;
+  }
+
   const embedder = flags["no-embed"] === "true" ? null : undefined;
+  const tags = parseTagList(flags.tags);
 
   switch (sub) {
     case "add": {
       const content = flags.content || rest.join(" ").trim();
-      const title = flags.title || content.slice(0, 64);
-      if (!content) {
+      const title =
+        flags.title ||
+        content
+          .split(/\r?\n/)
+          .map((l) => l.trim())
+          .find(Boolean)
+          ?.replace(/\s+/g, " ")
+          .slice(0, 64) ||
+        "";
+      if (!content || !title) {
         console.error(
           "Usage: brain memory add --title <t> --content <c> [--scope global|project] [--project <slug>] [--category ...]",
         );
@@ -312,11 +388,11 @@ async function cmdMemory(
       const res = await addMemorySmart(vault, {
         title,
         content,
-        scope: flags.scope as "global" | "project" | undefined,
+        scope,
         project: flags.project,
         category,
         app: flags.app ?? "cli",
-        tags: flags.tags ? flags.tags.split(",").map((s) => s.trim()).filter(Boolean) : undefined,
+        tags,
         supersedeId: flags.supersede,
         dedupe: flags.force === "true" ? "force" : "dedupe",
         embedder,
@@ -326,12 +402,13 @@ async function cmdMemory(
     }
     case "list": {
       const items = await listMemories(vault, {
-        scope: flags.scope as "global" | "project" | undefined,
+        scope,
         project: flags.project,
         category,
         app: flags.app,
-        status: (flags.status as "active" | "superseded" | "all" | undefined) ?? "active",
-        limit: flags.limit ? Number(flags.limit) : 30,
+        tags,
+        status: status ?? "active",
+        limit: limit ?? 30,
       });
       console.log(JSON.stringify({ count: items.length, memories: items }, null, 2));
       break;
@@ -344,15 +421,37 @@ async function cmdMemory(
         return;
       }
       const res = await searchMemories(vault, query, {
-        scope: flags.scope as "global" | "project" | undefined,
+        scope,
         project: flags.project,
         category,
         app: flags.app,
-        status: (flags.status as "active" | "superseded" | "all" | undefined) ?? "active",
-        mode: (flags.mode as SearchMode | undefined) ?? (flags["no-embed"] === "true" ? "fts" : "hybrid"),
-        limit: flags.limit ? Number(flags.limit) : 10,
+        tags,
+        status: status ?? "active",
+        mode: mode ?? (flags["no-embed"] === "true" ? "fts" : "hybrid"),
+        limit: limit ?? 10,
         embedder,
       });
+      console.log(JSON.stringify(res, null, 2));
+      break;
+    }
+    case "update": {
+      const id = flags.id || rest[0];
+      if (!id) {
+        console.error(
+          "Usage: brain memory update <id> [--title <t>] [--content <c>] [--tags a,b] [--category ...]",
+        );
+        process.exitCode = 1;
+        return;
+      }
+      const res = await updateMemory(vault, {
+        id,
+        title: flags.title,
+        content: flags.content,
+        tags,
+        category,
+        app: flags.app,
+      });
+      await syncVaultIndex(vault, { embedder }).catch(() => {});
       console.log(JSON.stringify(res, null, 2));
       break;
     }
@@ -360,16 +459,20 @@ async function cmdMemory(
       const oldId = flags.id || rest[0];
       const content = flags.content || rest.slice(1).join(" ").trim();
       if (!oldId || !content) {
-        console.error("Usage: brain memory supersede <old-id> --content <new-content> [--title <t>]");
+        console.error(
+          "Usage: brain memory supersede <old-id> --content <new-content> [--title <t>] [--tags a,b]",
+        );
         process.exitCode = 1;
         return;
       }
       const res = await supersedeMemory(vault, oldId, {
         title: flags.title,
         content,
+        tags,
         category,
         app: flags.app ?? "cli",
       });
+      await syncVaultIndex(vault, { embedder }).catch(() => {});
       console.log(JSON.stringify(res, null, 2));
       break;
     }
@@ -381,11 +484,12 @@ async function cmdMemory(
         return;
       }
       const res = await deleteMemory(vault, id);
+      await syncVaultIndex(vault, { embedder }).catch(() => {});
       console.log(JSON.stringify(res, null, 2));
       break;
     }
     default:
-      console.error("Usage: brain memory <add|list|search|supersede|delete>");
+      console.error("Usage: brain memory <add|list|search|update|supersede|delete>");
       process.exitCode = 1;
   }
 }
