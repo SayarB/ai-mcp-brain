@@ -17,3 +17,31 @@ vault_path = "~/Obsidian/My Brain"
 # default_issue_type = "Task"
 # For all assigned (not just sprints), agents should ask then use scope=all on tools.
 # Releases need Manage Versions / Administer Projects on the project.
+
+# Optional local Streamable HTTP MCP daemon + control dashboard (`brain daemon`).
+# ACL note: without per-app `token_env`, `?app=<name>` is a cooperative guard-rail for
+# trusted local harnesses (stdio mode does not enforce daemon ACLs). For strict per-app
+# isolation, set `default_mode = "disabled"` (or `"read-only"`) and assign each harness
+# its own `token_env` plus an admin `auth_token_env`.
+# [daemon]
+# host = "127.0.0.1"
+# port = 4190
+# default_mode = "read-write"     # read-write | read-only | disabled
+# auth_token_env = "BRAIN_DAEMON_TOKEN"
+# allow_remote = false            # requires an auth token when true
+# allowed_origins = []            # extra browser Origins allowed on /mcp and /api/*
+#
+# Per-harness ACL defaults (also editable live at http://127.0.0.1:4190/ or via `brain acl`):
+# [apps.claude]
+# mode = "read-write"
+# # token_env = "BRAIN_TOKEN_CLAUDE"
+#
+# [apps.cursor]
+# mode = "read-write"
+# # token_env = "BRAIN_TOKEN_CURSOR"
+#
+# [apps.sandbox]
+# mode = "read-only"
+# read_scopes = ["project"]
+# allowed_projects = ["demo-app"]
+# denied_tools = ["delete_memory", "jira_release"]  # use ["*"] to deny all tools

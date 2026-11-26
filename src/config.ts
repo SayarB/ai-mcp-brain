@@ -1,5 +1,6 @@
 import { homedir, platform } from "node:os";
 import { join, resolve } from "node:path";
+import { z } from "zod";
 import {
   moduleDir,
   parseToml,
@@ -28,10 +29,85 @@ export type JiraConfig = {
   default_issue_type?: string;
 };
 
+export type DaemonConfig = {
+  host?: string;
+  port?: number;
+  default_mode?: "read-write" | "read-only" | "disabled";
+  auth_token_env?: string;
+  allow_remote?: boolean;
+  allowed_origins?: string[];
+};
+
+export type AppConfigEntry = {
+  enabled?: boolean;
+  mode?: "read-write" | "read-only" | "disabled";
+  read_scopes?: ("global" | "project")[];
+  write_scopes?: ("global" | "project")[];
+  allowed_projects?: string[];
+  denied_tools?: string[];
+  /** Optional env var holding a dedicated Bearer token that authenticates & pins this app. */
+  token_env?: string;
+};
+
+const AccessModeSchema = z.enum(["read-write", "read-only", "disabled"]);
+const ScopeSchema = z.enum(["global", "project"]);
+
+const DaemonConfigSchema = z
+  .object({
+    host: z.string().min(1).optional(),
+    port: z.number().int().min(0).max(65535).optional(),
+    default_mode: AccessModeSchema.optional(),
+    auth_token_env: z.string().min(1).optional(),
+    allow_remote: z.boolean().optional(),
+    allowed_origins: z.array(z.string().min(1)).optional(),
+  })
+  .strict();
+
+const AppConfigEntrySchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    mode: AccessModeSchema.optional(),
+    read_scopes: z.array(ScopeSchema).optional(),
+    write_scopes: z.array(ScopeSchema).optional(),
+    allowed_projects: z.array(z.string()).optional(),
+    denied_tools: z.array(z.string()).optional(),
+    token_env: z.string().min(1).optional(),
+  })
+  .strict();
+
+export function parseDaemonConfig(raw: unknown): DaemonConfig {
+  const res = DaemonConfigSchema.safeParse(raw);
+  if (!res.success) {
+    throw new Error(
+      `Invalid [daemon] config: ${res.error.issues.map((i) => `${i.path.join(".") || "daemon"}: ${i.message}`).join("; ")}`,
+    );
+  }
+  return res.data;
+}
+
+export function parseAppsConfig(raw: unknown): Record<string, AppConfigEntry> {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error("Invalid [apps] config: expected a table of [apps.<name>] entries");
+  }
+  const out: Record<string, AppConfigEntry> = {};
+  for (const [name, entry] of Object.entries(raw as Record<string, unknown>)) {
+    const res = AppConfigEntrySchema.safeParse(entry);
+    if (!res.success) {
+      throw new Error(
+        `Invalid [apps.${name}] config: ${res.error.issues.map((i) => `${i.path.join(".") || name}: ${i.message}`).join("; ")}`,
+      );
+    }
+    out[name] = res.data;
+  }
+  return out;
+}
+
 export type BrainConfig = {
   vault_path: string;
   inject: InjectConfig;
   jira?: JiraConfig;
+  daemon?: DaemonConfig;
+  apps?: Record<string, AppConfigEntry>;
 };
 
 /** Cross-OS defaults using ~ (expanded at resolve time). */
@@ -78,18 +154,35 @@ function repoRoot(): string {
   return resolve(moduleDir(import.meta.url), "..");
 }
 
-function extractTomlTable(raw: string, tableName: string): string | null {
+const TOML_HEADER_RE = /^\s*\[\s*([^\]]+?)\s*\](?:\s*#.*)?$/;
+
+export function extractTomlTables(raw: string, prefixes: string[]): string {
   const lines = raw.split(/\r?\n/);
-  const start = lines.findIndex((l) => l.trim() === `[${tableName}]`);
-  if (start < 0) return null;
-  let end = start + 1;
-  while (end < lines.length && !/^\s*\[[^\]]+\]\s*$/.test(lines[end]!)) {
-    end++;
+  const blocks: string[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    const match = lines[i]!.match(TOML_HEADER_RE);
+    const headerName = match?.[1]?.replace(/\s*\.\s*/g, ".");
+    if (
+      headerName &&
+      prefixes.some((p) => headerName === p || headerName.startsWith(`${p}.`))
+    ) {
+      let end = i + 1;
+      while (end < lines.length && !TOML_HEADER_RE.test(lines[end]!)) {
+        end++;
+      }
+      blocks.push(lines.slice(i, end).join("\n").trimEnd());
+      i = end;
+      continue;
+    }
+    i++;
   }
-  return lines.slice(start, end).join("\n").trimEnd();
+  return blocks.join("\n\n");
 }
 
-export async function loadConfig(): Promise<BrainConfig> {
+export async function loadConfig(opts?: {
+  strictDaemon?: boolean;
+}): Promise<BrainConfig> {
   const defaults: BrainConfig = {
     vault_path: DEFAULTS.vault_path,
     inject: platformInjectDefaults(),
@@ -104,6 +197,8 @@ export async function loadConfig(): Promise<BrainConfig> {
     Partial<BrainConfig> & {
       inject?: Partial<InjectConfig>;
       jira?: JiraConfig;
+      daemon?: unknown;
+      apps?: unknown;
     }
   >(await readText(configPath));
   const inj = platformInjectDefaults();
@@ -118,6 +213,34 @@ export async function loadConfig(): Promise<BrainConfig> {
         default_issue_type: parsed.jira.default_issue_type,
       }
     : undefined;
+
+  let daemon: DaemonConfig | undefined;
+  if (parsed.daemon !== undefined) {
+    try {
+      daemon = parseDaemonConfig(parsed.daemon);
+    } catch (err) {
+      if (opts?.strictDaemon) throw err;
+      console.error(
+        `[ai-mcp-brain] WARNING: ignoring malformed [daemon] config: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+  }
+
+  let apps: Record<string, AppConfigEntry> | undefined;
+  if (parsed.apps !== undefined) {
+    try {
+      apps = parseAppsConfig(parsed.apps);
+    } catch (err) {
+      if (opts?.strictDaemon) throw err;
+      console.error(
+        `[ai-mcp-brain] WARNING: ignoring malformed [apps] config: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+  }
 
   return {
     vault_path: parsed.vault_path ?? defaults.vault_path,
@@ -134,10 +257,12 @@ export async function loadConfig(): Promise<BrainConfig> {
       zed_agents_file: parsed.inject?.zed_agents_file ?? inj.zed_agents_file,
     },
     jira,
+    daemon,
+    apps,
   };
 }
 
-/** Write config.toml for a chosen vault path (portable ~ form when under home). Preserves [jira]. */
+/** Write config.toml for a chosen vault path (portable ~ form when under home). Preserves [jira], [daemon], and [apps.*]. */
 export async function writeConfig(vaultPathInput: string): Promise<string> {
   const abs = resolveVaultPath(vaultPathInput);
   const home = homedir();
@@ -146,22 +271,22 @@ export async function writeConfig(vaultPathInput: string): Promise<string> {
     : abs.split("\\").join("/");
 
   const configPath = join(repoRoot(), "config.toml");
-  let preservedJira = "";
+  let preservedSections = "";
   if (await pathExists(configPath)) {
     const existing = await readText(configPath);
-    const table = extractTomlTable(existing, "jira");
-    if (table) preservedJira = `\n${table}\n`;
+    const tables = extractTomlTables(existing, ["jira", "daemon", "apps"]);
+    if (tables) preservedSections = `\n${tables}\n`;
   }
 
   const body = `# Generated by setup. BRAIN_VAULT env overrides vault_path.
-# Optional Jira: copy [jira] from config.example.toml and set .env (see .env.example).
+# Optional Jira / Daemon / ACLs: see config.example.toml.
 
 vault_path = ${JSON.stringify(vaultForToml)}
 
 [inject]
 # Leave defaults unless you need custom harness paths.
 # Zed paths are OS-specific and resolved at runtime if omitted from an older config.
-${preservedJira}`;
+${preservedSections}`;
 
   await writeText(configPath, body);
   return configPath;

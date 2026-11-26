@@ -300,9 +300,13 @@ export async function getProjectContext(
   vaultPath: string,
   project: string,
   limit = 20,
+  opts?: { createIfMissing?: boolean },
 ): Promise<{ notes: VaultNote[]; ensured: string[] }> {
   const canonicalSlug = await resolveProjectSlug(vaultPath, project);
-  const { slug, created } = await ensureProject(vaultPath, canonicalSlug);
+  const { slug, created } =
+    opts?.createIfMissing === false
+      ? { slug: slugify(canonicalSlug), created: [] as string[] }
+      : await ensureProject(vaultPath, canonicalSlug);
   const needle = slug.toLowerCase();
   const paths = await listNotePaths(vaultPath);
   const matched: VaultNote[] = [];
@@ -311,13 +315,10 @@ export async function getProjectContext(
     const underProject = path.startsWith(`projects/${slug}/`);
     const note = await readNote(vaultPath, path);
     const front = note.body.slice(0, 500).toLowerCase();
-    const pathHit =
-      path.startsWith("projects/") && path.toLowerCase().includes(needle);
     const metaHit =
-      front.includes(`project: ${needle}`) ||
-      front.includes(`project: "${needle}"`);
+      new RegExp(`^project:\\s*["']?${needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["']?\\s*$`, "m").test(front);
 
-    if (underProject || pathHit || metaHit) {
+    if (underProject || metaHit) {
       matched.push(note);
     }
   }
