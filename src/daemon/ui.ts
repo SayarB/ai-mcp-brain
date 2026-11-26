@@ -274,6 +274,7 @@ export function renderDashboardHtml(opts?: {
 
     <nav class="tabs">
       <button class="tab active" data-tab="apps">Harnesses &amp; ACLs</button>
+      <button class="tab" data-tab="pending">Pending Inbox <span class="pill warn" id="pendingTabBadge" style="display:none">0</span></button>
       <button class="tab" data-tab="logs">Live Access Log</button>
       <button class="tab" data-tab="search">Search Score Debugger</button>
       <button class="tab" data-tab="memories">Atomic Memories</button>
@@ -432,9 +433,47 @@ export function renderDashboardHtml(opts?: {
             <input id="memFilterProject" placeholder="Project" style="width:120px" />
             <button id="refreshMemBtn">Refresh</button>
           </div>
-          <span class="muted" id="memCountLabel"></span>
+          <div class="row">
+            <button id="dreamPreviewBtn" title="Run dry-run memory consolidation & hygiene check">Dream Preview</button>
+            <button id="dreamApplyBtn" class="primary" title="Consolidate duplicates & archive stale superseded memories">Run Dream (--apply)</button>
+            <span class="muted" id="memCountLabel"></span>
+          </div>
         </div>
+        <div id="dreamOutput" style="display:none; margin-bottom:12px" class="hit"></div>
         <div id="memoriesList"></div>
+      </div>
+    </section>
+
+    <!-- Panel 5: Pending Approval Queue -->
+    <section id="tab-pending" class="panel">
+      <div class="card">
+        <h3>Capture Candidates From Session Notes</h3>
+        <form id="captureForm" class="row" style="align-items:flex-end">
+          <div class="field" style="flex:2; min-width:260px">
+            <label>Session summary / notes (secrets auto-dropped)</label>
+            <textarea id="captureText" rows="2" placeholder="e.g. Decided to use SQLite WAL mode for local indexing. Gotcha: always check closing markers before fences." required></textarea>
+          </div>
+          <div class="field">
+            <label>Project (optional)</label>
+            <input id="captureProject" placeholder="slug" style="width:130px" />
+          </div>
+          <button type="submit" class="primary">Extract Candidates</button>
+        </form>
+      </div>
+      <div class="card">
+        <div class="row between" style="margin-bottom:10px">
+          <div class="row">
+            <select id="pendingFilterStatus">
+              <option value="pending">pending</option>
+              <option value="approved">approved</option>
+              <option value="dismissed">dismissed</option>
+              <option value="all">all</option>
+            </select>
+            <button id="refreshPendingBtn">Refresh</button>
+          </div>
+          <span class="muted" id="pendingCountLabel"></span>
+        </div>
+        <div id="pendingList"></div>
       </div>
     </section>
   </main>
@@ -493,6 +532,7 @@ export function renderDashboardHtml(opts?: {
         document.getElementById("tab-" + btn.dataset.tab).classList.add("active");
         if (btn.dataset.tab === "logs") loadLogs();
         if (btn.dataset.tab === "memories") loadMemories();
+        if (btn.dataset.tab === "pending") loadPending();
         if (btn.dataset.tab === "apps") loadApps();
       });
     });
@@ -510,9 +550,16 @@ export function renderDashboardHtml(opts?: {
         const h = await api("/api/health");
         document.getElementById("vaultPill").textContent = "vault: " + h.vault;
         document.getElementById("countsPill").textContent =
-          "notes: " + h.noteCount + " · memories: " + h.memoryCount;
+          "notes: " + h.noteCount + " · memories: " + h.memoryCount + (h.pendingCount ? " · pending: " + h.pendingCount : "");
         document.getElementById("sessionsPill").textContent = "sessions: " + h.activeSessions;
         document.getElementById("statusDot").style.background = h.readable ? "var(--ok)" : "var(--danger)";
+        const badge = document.getElementById("pendingTabBadge");
+        if (h.pendingCount > 0) {
+          badge.textContent = String(h.pendingCount);
+          badge.style.display = "inline-flex";
+        } else {
+          badge.style.display = "none";
+        }
       } catch (err) {
         document.getElementById("statusDot").style.background = "var(--danger)";
       }
@@ -838,6 +885,114 @@ export function renderDashboardHtml(opts?: {
       } catch (err) { showToast(err.message); }
     });
 
+    async function loadPending() {
+      const status = document.getElementById("pendingFilterStatus").value;
+      const list = document.getElementById("pendingList");
+      try {
+        const { count, pending } = await api("/api/pending?status=" + encodeURIComponent(status) + "&limit=100");
+        document.getElementById("pendingCountLabel").textContent = count + " items";
+        if (!pending.length) {
+          list.innerHTML = '<div class="muted">No candidate memories in this view.</div>';
+          return;
+        }
+        list.innerHTML = pending.map((p) =>
+          '<div class="hit">' +
+            '<div class="row between">' +
+              '<div class="row"><span class="pill mono">' + esc(p.id) + '</span><strong>' + esc(p.title) + '</strong>' +
+              '<span class="pill ' + (p.status === "pending" ? "warn" : p.status === "approved" ? "ok" : "") + '">' + esc(p.status) + '</span>' +
+              '<span class="pill">' + esc(p.category) + '</span>' +
+              '<span class="pill">' + esc(p.project ? "project:" + p.project : "global") + '</span>' +
+              '<span class="pill">app:' + esc(p.app) + '</span></div>' +
+              (p.status === "pending"
+                ? '<div class="row"><button class="primary js-approve" data-id="' + esc(p.id) + '">Approve</button><button class="danger js-dismiss" data-id="' + esc(p.id) + '">Dismiss</button></div>'
+                : '') +
+            '</div>' +
+            '<div class="muted mono" style="margin-top:4px">' + esc(p.reason || "captured") + ' · conf=' + esc(p.confidence) +
+              (p.promotedMemoryId ? ' · promoted=' + esc(p.promotedMemoryId) : '') + '</div>' +
+            '<div style="margin-top:6px; white-space:pre-wrap">' + esc(p.content) + '</div>' +
+          '</div>'
+        ).join("");
+        list.querySelectorAll(".js-approve").forEach((b) => {
+          b.addEventListener("click", async () => {
+            try {
+              const res = await api("/api/pending/" + encodeURIComponent(b.dataset.id) + "/approve", {
+                method: "POST",
+                body: JSON.stringify({}),
+              });
+              showToast("Promoted " + b.dataset.id + " -> " + res.promoted.memory.id);
+              loadPending();
+              loadHealth();
+            } catch (err) { showToast(err.message); }
+          });
+        });
+        list.querySelectorAll(".js-dismiss").forEach((b) => {
+          b.addEventListener("click", async () => {
+            try {
+              await api("/api/pending/" + encodeURIComponent(b.dataset.id) + "/dismiss", {
+                method: "POST",
+                body: JSON.stringify({}),
+              });
+              showToast("Dismissed " + b.dataset.id);
+              loadPending();
+              loadHealth();
+            } catch (err) { showToast(err.message); }
+          });
+        });
+      } catch (err) {
+        list.innerHTML = '<div class="muted">' + esc(err.message) + '</div>';
+      }
+    }
+
+    document.getElementById("refreshPendingBtn").addEventListener("click", loadPending);
+    document.getElementById("captureForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const summary = document.getElementById("captureText").value.trim();
+      const project = document.getElementById("captureProject").value.trim() || undefined;
+      try {
+        const res = await api("/api/ingest-session", {
+          method: "POST",
+          body: JSON.stringify({ summary, project, app: "ui" }),
+        });
+        document.getElementById("captureText").value = "";
+        showToast("Staged " + res.staged.length + " candidate(s) (dupes skipped: " + res.skippedDuplicates + ", secrets dropped: " + res.skippedSecrets + ")");
+        loadPending();
+        loadHealth();
+      } catch (err) { showToast(err.message); }
+    });
+
+    async function runDreamUi(apply) {
+      const box = document.getElementById("dreamOutput");
+      box.style.display = "block";
+      box.innerHTML = '<div class="muted">Running dream consolidation…</div>';
+      try {
+        const project = document.getElementById("memFilterProject").value.trim() || undefined;
+        const r = await api("/api/dream", {
+          method: "POST",
+          body: JSON.stringify({ apply, project }),
+        });
+        box.innerHTML =
+          '<div class="row between"><strong>' + esc(r.summary) + '</strong>' +
+          (apply ? '<span class="pill ok">applied</span>' : '<span class="pill warn">dry-run</span>') + '</div>' +
+          '<div class="muted mono" style="margin-top:6px">' +
+            'duplicates consolidated: ' + esc(r.actionsApplied.duplicatesConsolidated) +
+            ' · stale superseded pruned: ' + esc(r.actionsApplied.supersededArchivedAndPruned) +
+            (r.actionsApplied.archivePath ? ' · archive: ' + esc(r.actionsApplied.archivePath) : '') +
+          '</div>';
+        if (apply) {
+          loadMemories();
+          loadHealth();
+        }
+      } catch (err) {
+        box.innerHTML = '<div class="muted">' + esc(err.message) + '</div>';
+      }
+    }
+
+    document.getElementById("dreamPreviewBtn").addEventListener("click", () => runDreamUi(false));
+    document.getElementById("dreamApplyBtn").addEventListener("click", () => {
+      if (!confirm("Consolidate duplicate memories and archive old superseded blocks?")) return;
+      runDreamUi(true);
+    });
+
     document.getElementById("reindexBtn").addEventListener("click", async () => {
       try {
         showToast("Reindexing vault…");
@@ -859,6 +1014,7 @@ export function renderDashboardHtml(opts?: {
           loadHealth();
           if (document.getElementById("tab-logs").classList.contains("active")) loadLogs();
           if (document.getElementById("tab-apps").classList.contains("active")) loadApps();
+          if (document.getElementById("tab-pending").classList.contains("active")) loadPending();
         }, 4000);
         return;
       }
@@ -867,6 +1023,10 @@ export function renderDashboardHtml(opts?: {
         loadHealth();
         if (document.getElementById("tab-logs").classList.contains("active")) loadLogs();
         if (document.getElementById("tab-apps").classList.contains("active")) loadApps();
+      });
+      sse.addEventListener("pending", () => {
+        loadHealth();
+        if (document.getElementById("tab-pending").classList.contains("active")) loadPending();
       });
       sse.onerror = () => {
         document.getElementById("streamBadge").textContent = "reconnecting";

@@ -52,7 +52,7 @@ Then: open vault in Obsidian → restart editors → MCP `vault_info` → `reada
 | `npm run mcp` / `bun run mcp` | MCP server (stdio) |
 | `npm run daemon` / `bun run daemon` | Shared Streamable HTTP MCP daemon (`127.0.0.1:4190/mcp?app=<harness>`) + local control UI (`http://127.0.0.1:4190/`) |
 | `npm run setup` / `bun run setup` | Optional one-shot install |
-| `npm run brain -- …` | CLI (`init`, `inject`, `daemon`, `acl`, `reindex`, `search`, `memory`) |
+| `npm run brain -- …` | CLI (`init`, `inject`, `daemon`, `acl`, `bootstrap`, `capture`, `pending`, `dream`, `reindex`, `search`, `memory`) |
 
 To connect harnesses to the shared HTTP daemon instead of per-client stdio processes, start `npm run daemon` (or `bun run daemon`) and run `npm run brain -- inject --transport http` (wires Cursor & Codex HTTP configs; for Claude Code run `claude mcp add --transport http ai-mcp-brain "http://127.0.0.1:4190/mcp?app=claude"`; Zed stays on stdio). Manage per-harness pause toggles, read-only/project scopes, live access logs, and hybrid search score debugging at `http://127.0.0.1:4190/` or via `brain acl <list|set|pause|resume|reset>`.
 
@@ -107,6 +107,11 @@ My Brain/
 | `update_memory` | Surgically edit an atomic memory by ID |
 | `supersede_memory` | Replace outdated memory while keeping temporal history |
 | `delete_memory` | Permanently remove an atomic memory by ID |
+| `bootstrap_context` | Single-call token-budgeted session briefing (global + project + task recall + pending count) |
+| `list_pending_memories` | Review passively captured candidate memories awaiting approval |
+| `approve_pending_memory` | Promote a pending candidate into canonical vault Markdown |
+| `dismiss_pending_memory` | Dismiss a pending candidate memory |
+| `consolidate_memories` | Sleep-time memory consolidation (`brain dream`: dry-run preview or apply) |
 | `get_project_context` | Ensure + load a git-repo project pack (resolves `projects-index.md`) |
 | `list_recent` | Recent tools/skills |
 | `track_tool` | Catalog SaaS/tool + prepend recent |

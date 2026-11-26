@@ -898,6 +898,68 @@ export async function updateMemory(
   });
 }
 
+/**
+ * Mark an existing active memory as superseded by another already-existing memory ID
+ * (used by `brain dream` duplicate consolidation without creating a redundant third block).
+ */
+export async function markMemorySupersededBy(
+  vaultPath: string,
+  oldId: string,
+  replacementId: string,
+): Promise<AtomicMemory> {
+  const cleanOld = oldId.trim();
+  const cleanRep = replacementId.trim();
+  if (!cleanOld || !cleanRep || cleanOld === cleanRep) {
+    throw new Error("oldId and replacementId must be distinct non-empty memory IDs");
+  }
+  const located = await findMemoryById(vaultPath, cleanOld);
+  if (!located) {
+    throw new Error(`Memory not found: ${cleanOld}`);
+  }
+  const repLocated = await findMemoryById(vaultPath, cleanRep);
+  if (!repLocated) {
+    throw new Error(`Replacement memory not found: ${cleanRep}`);
+  }
+
+  return withFileLock(located.absPath, async () => {
+    const raw = await readText(located.absPath);
+    const eol = detectEol(raw);
+    const lf = raw.replace(/\r\n/g, "\n");
+    const blocks = parseMemoryFile(located.relPath, lf);
+    const hit = blocks.find((b) => b.memory.id === cleanOld);
+    if (!hit) {
+      throw new Error(`Memory not found: ${cleanOld}`);
+    }
+    if (hit.memory.status === "superseded") {
+      throw new Error(
+        `Memory ${hit.memory.id} is already superseded${
+          hit.memory.supersededBy ? ` by ${hit.memory.supersededBy}` : ""
+        }.`,
+      );
+    }
+
+    const date = todayIso();
+    const updated: AtomicMemory = {
+      ...hit.memory,
+      status: "superseded",
+      supersededBy: cleanRep,
+      updated: date,
+    };
+    const lines = lf.split("\n");
+    const nextLf = spliceLinesCleanly(
+      lines,
+      hit.startLine,
+      hit.endLine,
+      renderMemoryBlock(updated).split("\n"),
+    );
+    await writeTextAtomic(
+      located.absPath,
+      applyEol(bumpFrontmatterUpdated(nextLf, date), eol),
+    );
+    return updated;
+  });
+}
+
 export async function supersedeMemory(
   vaultPath: string,
   oldId: string,

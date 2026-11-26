@@ -37,9 +37,13 @@ import {
 import { createBrainServer } from "../mcp/server.ts";
 import {
   addMemorySmart,
+  approvePendingMemory,
+  bootstrapContext,
   deleteMemory,
+  ingestSessionToPending,
   listMemories,
   MEMORY_CATEGORIES,
+  runDreamConsolidation,
   searchMemories,
   SecretDetectedError,
   supersedeMemory,
@@ -48,6 +52,7 @@ import {
 import { isMainModule } from "../runtime.ts";
 import { vaultInfo } from "../vault.ts";
 import {
+  canWriteTarget,
   normalizeAppNameOrDefault,
   normalizeDeniedToolList,
   validateAppName,
@@ -59,6 +64,7 @@ import {
   DaemonStateStore,
   type AccessLogEntry,
   type AccessStatus,
+  type PendingStatus,
 } from "./state.ts";
 import { renderDashboardHtml } from "./ui.ts";
 
@@ -540,6 +546,7 @@ export async function startBrainDaemon(
     req: IncomingMessage,
     res: ServerResponse,
     url: URL,
+    pinnedApp: string | null,
   ): Promise<void> {
     const method = (req.method ?? "GET").toUpperCase();
     const pathname = url.pathname;
@@ -583,6 +590,7 @@ export async function startBrainDaemon(
         readable: info.readable,
         noteCount: info.noteCount,
         memoryCount: memories.length,
+        pendingCount: stateStore.countPendingMemories(),
         activeSessions: sessions.size,
         indexReady,
       });
@@ -933,6 +941,223 @@ export async function startBrainDaemon(
       return;
     }
 
+    // POST /api/ingest-session — passive capture into Pending Approval Queue
+    if (pathname === "/api/ingest-session" && method === "POST") {
+      let body: unknown;
+      try {
+        body = await readJsonBody(req);
+      } catch (err) {
+        const status = err instanceof PayloadTooLargeError ? 413 : 400;
+        sendJson(res, status, { error: err instanceof Error ? err.message : String(err) });
+        return;
+      }
+      const b = (body ?? {}) as Record<string, unknown>;
+      const rawApp = typeof b.app === "string" && b.app.trim() ? b.app.trim() : undefined;
+      let effectiveApp: string;
+      try {
+        if (pinnedApp) {
+          if (rawApp && validateAppName(rawApp) !== pinnedApp) {
+            sendJson(res, 403, {
+              error: `Token belongs to app "${pinnedApp}", cannot assert app "${rawApp}"`,
+            });
+            return;
+          }
+          effectiveApp = pinnedApp;
+        } else {
+          effectiveApp = normalizeAppNameOrDefault(rawApp, "hook");
+        }
+      } catch (err) {
+        sendJson(res, 400, { error: err instanceof Error ? err.message : String(err) });
+        return;
+      }
+
+      const policy = stateStore.getEffectivePolicy(effectiveApp);
+      if (pinnedApp && (!policy.enabled || policy.mode !== "read-write")) {
+        sendJson(res, 403, {
+          error: `ACL denied: app "${effectiveApp}" does not have write permission to ingest sessions`,
+        });
+        return;
+      }
+
+      const summary = typeof b.summary === "string" ? b.summary : undefined;
+      const transcript = typeof b.transcript === "string" ? b.transcript : undefined;
+      const commits = Array.isArray(b.commits)
+        ? b.commits.filter((c): c is string => typeof c === "string")
+        : undefined;
+      // Restrict arbitrary cwd git execution to admin callers; per-app tokens pass summary/transcript/commits directly
+      const cwd = !pinnedApp && typeof b.cwd === "string" && b.cwd.trim() ? b.cwd.trim() : undefined;
+      const project = typeof b.project === "string" && b.project.trim() ? b.project.trim() : undefined;
+      const session = typeof b.session === "string" && b.session.trim() ? b.session.trim() : undefined;
+      const maxCandidates =
+        typeof b.maxCandidates === "number" && Number.isFinite(b.maxCandidates)
+          ? b.maxCandidates
+          : undefined;
+
+      try {
+        const result = await ingestSessionToPending(vaultPath, stateStore, {
+          summary,
+          transcript,
+          commits,
+          cwd,
+          project,
+          app: effectiveApp,
+          session,
+          maxCandidates,
+          allowCandidate: pinnedApp
+            ? (cand) => canWriteTarget(policy, cand.scope, cand.project)
+            : undefined,
+        });
+        if (result.staged.length > 0) {
+          broadcastEvent("pending", { count: stateStore.countPendingMemories(), staged: result.staged.length });
+        }
+        sendJson(res, 200, result);
+      } catch (err) {
+        sendJson(res, 400, { error: err instanceof Error ? err.message : String(err) });
+      }
+      return;
+    }
+
+    // GET /api/pending
+    if (pathname === "/api/pending" && method === "GET") {
+      const statusRaw = url.searchParams.get("status");
+      const status: PendingStatus | "all" =
+        statusRaw === "approved" || statusRaw === "dismissed" || statusRaw === "all"
+          ? statusRaw
+          : "pending";
+      const scopeRaw = url.searchParams.get("scope");
+      const scope = scopeRaw === "global" || scopeRaw === "project" ? scopeRaw : undefined;
+      const project = url.searchParams.get("project") || undefined;
+      const catRaw = url.searchParams.get("category");
+      const category =
+        catRaw && (MEMORY_CATEGORIES as readonly string[]).includes(catRaw)
+          ? (catRaw as MemoryCategory)
+          : undefined;
+      const limitRaw = url.searchParams.get("limit");
+      const limitNum = limitRaw ? Number(limitRaw) : 50;
+      const pending = stateStore.listPendingMemories({
+        status,
+        scope,
+        project,
+        category,
+        limit: Number.isFinite(limitNum) ? limitNum : 50,
+      });
+      sendJson(res, 200, { count: pending.length, pending });
+      return;
+    }
+
+    // POST /api/pending/:id/approve
+    const approveMatch = pathname.match(/^\/api\/pending\/([^/]+)\/approve$/);
+    if (approveMatch && method === "POST") {
+      let body: unknown;
+      try {
+        body = await readJsonBody(req);
+      } catch (err) {
+        const status = err instanceof PayloadTooLargeError ? 413 : 400;
+        sendJson(res, status, { error: err instanceof Error ? err.message : String(err) });
+        return;
+      }
+      const b = (body ?? {}) as Record<string, unknown>;
+      try {
+        const id = decodeURIComponent(approveMatch[1]!);
+        const result = await approvePendingMemory(vaultPath, stateStore, id, {
+          title: typeof b.title === "string" && b.title.trim() ? b.title.trim() : undefined,
+          content: typeof b.content === "string" && b.content.trim() ? b.content.trim() : undefined,
+          scope: b.scope === "global" || b.scope === "project" ? b.scope : undefined,
+          project: typeof b.project === "string" && b.project.trim() ? b.project.trim() : undefined,
+          category:
+            typeof b.category === "string" &&
+            (MEMORY_CATEGORIES as readonly string[]).includes(b.category)
+              ? (b.category as MemoryCategory)
+              : undefined,
+          tags: Array.isArray(b.tags)
+            ? b.tags.filter((t): t is string => typeof t === "string")
+            : undefined,
+          indexDbPath: options.indexDbPath,
+          embedder: options.embedder,
+        });
+        broadcastEvent("pending", { count: stateStore.countPendingMemories(), approved: id });
+        sendJson(res, 200, result);
+      } catch (err) {
+        const status = err instanceof SecretDetectedError ? 422 : 400;
+        sendJson(res, status, { error: err instanceof Error ? err.message : String(err) });
+      }
+      return;
+    }
+
+    // POST /api/pending/:id/dismiss
+    const dismissMatch = pathname.match(/^\/api\/pending\/([^/]+)\/dismiss$/);
+    if (dismissMatch && method === "POST") {
+      try {
+        const id = decodeURIComponent(dismissMatch[1]!);
+        const dismissed = stateStore.dismissPendingMemory(id);
+        broadcastEvent("pending", { count: stateStore.countPendingMemories(), dismissed: id });
+        sendJson(res, 200, { pending: dismissed });
+      } catch (err) {
+        sendJson(res, 404, { error: err instanceof Error ? err.message : String(err) });
+      }
+      return;
+    }
+
+    // POST /api/bootstrap — Session-start briefing
+    if (pathname === "/api/bootstrap" && method === "POST") {
+      let body: unknown;
+      try {
+        body = await readJsonBody(req);
+      } catch (err) {
+        const status = err instanceof PayloadTooLargeError ? 413 : 400;
+        sendJson(res, status, { error: err instanceof Error ? err.message : String(err) });
+        return;
+      }
+      const b = (body ?? {}) as Record<string, unknown>;
+      try {
+        const briefing = await bootstrapContext(vaultPath, {
+          project: typeof b.project === "string" ? b.project : undefined,
+          task: typeof b.task === "string" ? b.task : undefined,
+          maxChars:
+            typeof b.maxChars === "number" && Number.isFinite(b.maxChars)
+              ? b.maxChars
+              : undefined,
+          includeGlobal: typeof b.includeGlobal === "boolean" ? b.includeGlobal : undefined,
+          stateStore,
+          indexDbPath: options.indexDbPath,
+          embedder: options.embedder,
+        });
+        sendJson(res, 200, briefing);
+      } catch (err) {
+        sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) });
+      }
+      return;
+    }
+
+    // POST /api/dream — Sleep-time consolidation & hygiene
+    if (pathname === "/api/dream" && method === "POST") {
+      let body: unknown;
+      try {
+        body = await readJsonBody(req);
+      } catch (err) {
+        const status = err instanceof PayloadTooLargeError ? 413 : 400;
+        sendJson(res, status, { error: err instanceof Error ? err.message : String(err) });
+        return;
+      }
+      const b = (body ?? {}) as Record<string, unknown>;
+      try {
+        const report = await runDreamConsolidation(vaultPath, {
+          apply: b.apply === true,
+          project: typeof b.project === "string" && b.project.trim() ? b.project.trim() : undefined,
+          pruneDays:
+            typeof b.pruneDays === "number" && Number.isFinite(b.pruneDays)
+              ? b.pruneDays
+              : undefined,
+          dbPath: options.indexDbPath,
+          embedder: options.embedder,
+        });
+        sendJson(res, 200, report);
+      } catch (err) {
+        sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) });
+      }
+      return;
+    }
+
     // POST /api/reindex
     if (pathname === "/api/reindex" && method === "POST") {
       let body: unknown;
@@ -1010,7 +1235,7 @@ export async function startBrainDaemon(
             res.end(JSON.stringify({ error: "Unauthorized: invalid daemon token" }));
             return;
           }
-          if (isApiPath) {
+          if (isApiPath && pathname !== "/api/ingest-session") {
             sendJson(res, 403, {
               error: "Forbidden: per-app token cannot access daemon admin API",
             });
@@ -1044,7 +1269,7 @@ export async function startBrainDaemon(
 
       // 6. Local control REST API
       if (isApiPath) {
-        await handleApiRequest(req, res, url);
+        await handleApiRequest(req, res, url, pinnedApp);
         return;
       }
 

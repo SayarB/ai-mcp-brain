@@ -19,12 +19,17 @@ export const REGISTERED_TOOL_NAMES = [
   "read_note",
   "remember",
   "get_project_context",
+  "bootstrap_context",
   "add_memory",
   "search_memory",
   "list_memories",
   "update_memory",
   "supersede_memory",
   "delete_memory",
+  "list_pending_memories",
+  "approve_pending_memory",
+  "dismiss_pending_memory",
+  "consolidate_memories",
   "list_recent",
   "track_tool",
   "resolve_guidance",
@@ -253,6 +258,8 @@ const WRITE_TOOLS = new Set([
   "update_memory",
   "supersede_memory",
   "delete_memory",
+  "approve_pending_memory",
+  "dismiss_pending_memory",
   "track_tool",
   "upsert_guidance",
 ]);
@@ -262,8 +269,10 @@ const READ_TOOLS = new Set([
   "search_notes",
   "read_note",
   "get_project_context",
+  "bootstrap_context",
   "search_memory",
   "list_memories",
+  "list_pending_memories",
   "list_recent",
   "resolve_guidance",
   "list_guidance",
@@ -281,6 +290,9 @@ export function classifyToolOperation(
   if (WRITE_TOOLS.has(tool)) return "write";
   if (READ_TOOLS.has(tool)) return "read";
 
+  if (tool === "consolidate_memories") {
+    return args?.apply === true ? "write" : "read";
+  }
   const op = typeof args?.op === "string" ? args.op.trim().toLowerCase() : "";
   if (tool === "work_today") {
     return op === "list" ? "read" : "write";
@@ -549,6 +561,40 @@ export function summarizeToolCall(tool: string, args?: Record<string, unknown>):
         [pick("name"), pick("project") ? `project=${pick("project")}` : null]
           .filter(Boolean)
           .join(" "),
+      );
+    }
+    case "bootstrap_context": {
+      return redactLogSummary(
+        [
+          pick("project") ? `project=${pick("project")}` : null,
+          pick("task") ? `task="${pick("task")}"` : null,
+        ]
+          .filter(Boolean)
+          .join(" ") || "global",
+      );
+    }
+    case "list_pending_memories": {
+      return redactLogSummary(
+        [
+          pick("status") ? `status=${pick("status")}` : null,
+          pick("project") ? `project=${pick("project")}` : null,
+        ]
+          .filter(Boolean)
+          .join(" ") || "pending",
+      );
+    }
+    case "approve_pending_memory":
+    case "dismiss_pending_memory": {
+      const content = pick("content");
+      if (content && scanForSecrets(content).length > 0) {
+        return "[redacted: potential secret]";
+      }
+      return redactLogSummary([pick("id"), pick("title") ? `"${pick("title")}"` : null].filter(Boolean).join(" "));
+    }
+    case "consolidate_memories": {
+      const apply = args.apply === true ? "apply" : "dry-run";
+      return redactLogSummary(
+        [apply, pick("project") ? `project=${pick("project")}` : null].filter(Boolean).join(" "),
       );
     }
     case "work_today":

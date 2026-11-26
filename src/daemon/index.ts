@@ -34,6 +34,10 @@ export {
   type AccessLogQuery,
   type AccessStatus,
   type AppWithStats,
+  type PendingMemoryInput,
+  type PendingMemoryQuery,
+  type PendingMemoryRecord,
+  type PendingStatus,
 } from "./state.ts";
 export {
   DEFAULT_DAEMON_HOST,

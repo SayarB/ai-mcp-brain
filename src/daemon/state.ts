@@ -6,12 +6,19 @@
  * Stored separately from the disposable hybrid search index (`index-*.sqlite`)
  * so `brain reindex --force` never wipes ACL overrides or audit history.
  */
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import type { AppConfigEntry, DaemonConfig } from "../config.ts";
 import { openSqlite, type SqlDatabase, type SqlValue } from "../index/sqlite.ts";
+import { assertNoSecrets } from "../memory/guard.ts";
+import {
+  MEMORY_CATEGORIES,
+  type MemoryCategory,
+  type MemoryScope,
+} from "../memory/store.ts";
+import { slugify } from "../vault.ts";
 import {
   defaultAppPolicy,
   mergeAppPolicy,
@@ -61,6 +68,48 @@ export type AccessLogQuery = {
   operation?: ToolOperation;
   limit?: number;
   beforeId?: number;
+};
+
+export type PendingStatus = "pending" | "approved" | "dismissed";
+
+export type PendingMemoryInput = {
+  title: string;
+  content: string;
+  scope?: MemoryScope;
+  project?: string | null;
+  category?: MemoryCategory;
+  app?: string;
+  tags?: string[];
+  sourceSession?: string | null;
+  reason?: string;
+  confidence?: number;
+};
+
+export type PendingMemoryRecord = {
+  id: string;
+  createdAt: string;
+  updatedAt: string;
+  status: PendingStatus;
+  title: string;
+  content: string;
+  scope: MemoryScope;
+  project: string | null;
+  category: MemoryCategory;
+  app: string;
+  tags: string[];
+  sourceSession: string | null;
+  reason: string;
+  confidence: number;
+  promotedMemoryId: string | null;
+};
+
+export type PendingMemoryQuery = {
+  status?: PendingStatus | "all";
+  scope?: MemoryScope;
+  project?: string;
+  category?: MemoryCategory;
+  app?: string;
+  limit?: number;
 };
 
 export type AppWithStats = AppRecord & {
@@ -119,6 +168,26 @@ CREATE TABLE IF NOT EXISTS access_log (
 CREATE INDEX IF NOT EXISTS idx_access_log_app_id ON access_log(app, id DESC);
 CREATE INDEX IF NOT EXISTS idx_access_log_status_id ON access_log(status, id DESC);
 CREATE INDEX IF NOT EXISTS idx_access_log_tool_id ON access_log(tool, id DESC);
+
+CREATE TABLE IF NOT EXISTS pending_memories (
+  id TEXT PRIMARY KEY,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  title TEXT NOT NULL,
+  content TEXT NOT NULL,
+  scope TEXT NOT NULL DEFAULT 'global',
+  project TEXT,
+  category TEXT NOT NULL DEFAULT 'facts',
+  app TEXT NOT NULL DEFAULT 'hook',
+  tags TEXT NOT NULL DEFAULT '[]',
+  source_session TEXT,
+  reason TEXT NOT NULL DEFAULT '',
+  confidence REAL NOT NULL DEFAULT 0.7,
+  promoted_memory_id TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_pending_status_created ON pending_memories(status, created_at DESC);
 `;
 
 type RawAppRow = {
@@ -146,6 +215,50 @@ type RawLogRow = {
   result_count: number | null;
   duration_ms: number;
 };
+
+type RawPendingRow = {
+  id: string;
+  created_at: string;
+  updated_at: string;
+  status: string;
+  title: string;
+  content: string;
+  scope: string;
+  project: string | null;
+  category: string;
+  app: string;
+  tags: string;
+  source_session: string | null;
+  reason: string;
+  confidence: number;
+  promoted_memory_id: string | null;
+};
+
+function rowToPendingRecord(row: RawPendingRow): PendingMemoryRecord {
+  const status: PendingStatus =
+    row.status === "approved" || row.status === "dismissed" ? row.status : "pending";
+  const scope: MemoryScope = row.scope === "project" ? "project" : "global";
+  const category: MemoryCategory = (MEMORY_CATEGORIES as readonly string[]).includes(row.category)
+    ? (row.category as MemoryCategory)
+    : "facts";
+  return {
+    id: row.id,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    status,
+    title: row.title,
+    content: row.content,
+    scope,
+    project: row.project || null,
+    category,
+    app: row.app,
+    tags: parseJsonStringArray(row.tags),
+    sourceSession: row.source_session || null,
+    reason: row.reason || "",
+    confidence: Number.isFinite(Number(row.confidence)) ? Number(row.confidence) : 0.7,
+    promotedMemoryId: row.promoted_memory_id || null,
+  };
+}
 
 function parseJsonStringArray(raw: string): string[] {
   try {
@@ -548,6 +661,185 @@ export class DaemonStateStore {
   clearLogs(): number {
     const res = this.db.prepare("DELETE FROM access_log").run();
     return Number(res.changes ?? 0);
+  }
+
+  // --- Pending Approval Queue (Passive Capture) ---
+
+  stagePendingMemory(input: PendingMemoryInput): PendingMemoryRecord {
+    const title = input.title.replace(/\s+/g, " ").trim().slice(0, 120);
+    const content = input.content.trim();
+    if (!title || !content) {
+      throw new Error("Pending memory requires non-empty title and content.");
+    }
+    // Defense-in-depth: never persist potential secrets into the pending queue
+    assertNoSecrets(title, content);
+
+    const scope: MemoryScope =
+      input.scope ?? (input.project?.trim() ? "project" : "global");
+    const project =
+      scope === "project" && input.project?.trim() ? slugify(input.project.trim()) : null;
+    if (scope === "project" && !project) {
+      throw new Error("Project-scoped pending memory requires a project slug.");
+    }
+    const category: MemoryCategory =
+      input.category && (MEMORY_CATEGORIES as readonly string[]).includes(input.category)
+        ? input.category
+        : "facts";
+    const app = validateAppName(input.app?.trim() || "hook");
+    const tags = Array.isArray(input.tags)
+      ? [...new Set(input.tags.map((t) => t.trim().toLowerCase()).filter(Boolean))]
+      : [];
+    const confidence =
+      typeof input.confidence === "number" && Number.isFinite(input.confidence)
+        ? Math.min(1, Math.max(0, Math.round(input.confidence * 100) / 100))
+        : 0.7;
+
+    const id = `p_${randomBytes(4).toString("hex")}`;
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `INSERT INTO pending_memories (
+          id, created_at, updated_at, status, title, content, scope, project,
+          category, app, tags, source_session, reason, confidence, promoted_memory_id
+        ) VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+      )
+      .run(
+        id,
+        now,
+        now,
+        title,
+        content,
+        scope,
+        project,
+        category,
+        app,
+        JSON.stringify(tags),
+        input.sourceSession?.trim() || null,
+        (input.reason ?? "").trim().slice(0, 180),
+        confidence,
+      );
+
+    return {
+      id,
+      createdAt: now,
+      updatedAt: now,
+      status: "pending",
+      title,
+      content,
+      scope,
+      project,
+      category,
+      app,
+      tags,
+      sourceSession: input.sourceSession?.trim() || null,
+      reason: (input.reason ?? "").trim().slice(0, 180),
+      confidence,
+      promotedMemoryId: null,
+    };
+  }
+
+  getPendingMemory(id: string): PendingMemoryRecord | null {
+    const row = this.db
+      .prepare("SELECT * FROM pending_memories WHERE id = ?")
+      .get<RawPendingRow>(id.trim());
+    return row ? rowToPendingRecord(row) : null;
+  }
+
+  listPendingMemories(query?: PendingMemoryQuery): PendingMemoryRecord[] {
+    const where: string[] = [];
+    const params: SqlValue[] = [];
+    const status = query?.status ?? "pending";
+    if (status !== "all") {
+      where.push("status = ?");
+      params.push(status);
+    }
+    if (query?.scope) {
+      where.push("scope = ?");
+      params.push(query.scope);
+    }
+    if (query?.project) {
+      where.push("project = ?");
+      params.push(slugify(query.project));
+    }
+    if (query?.category) {
+      where.push("category = ?");
+      params.push(query.category);
+    }
+    if (query?.app) {
+      where.push("app = ?");
+      params.push(query.app.trim().toLowerCase());
+    }
+    const rawLimit = query?.limit;
+    const limit =
+      typeof rawLimit === "number" && Number.isFinite(rawLimit)
+        ? Math.min(200, Math.max(1, Math.trunc(rawLimit)))
+        : 50;
+    const clause = where.length ? `WHERE ${where.join(" AND ")}` : "";
+    params.push(limit);
+
+    const rows = this.db
+      .prepare(`SELECT * FROM pending_memories ${clause} ORDER BY created_at DESC LIMIT ?`)
+      .all<RawPendingRow>(...params);
+    return rows.map(rowToPendingRecord);
+  }
+
+  countPendingMemories(): number {
+    const row = this.db
+      .prepare("SELECT COUNT(*) AS c FROM pending_memories WHERE status = 'pending'")
+      .get<{ c: number }>();
+    return Number(row?.c ?? 0);
+  }
+
+  /** Atomically claim a pending row for promotion (prevents concurrent double-approval). */
+  claimPendingMemory(id: string): PendingMemoryRecord | null {
+    const cleanId = id.trim();
+    const now = new Date().toISOString();
+    return this.db.transaction(() => {
+      const row = this.db
+        .prepare("SELECT * FROM pending_memories WHERE id = ? AND status = 'pending'")
+        .get<RawPendingRow>(cleanId);
+      if (!row) return null;
+      const res = this.db
+        .prepare("UPDATE pending_memories SET status = 'approving', updated_at = ? WHERE id = ? AND status = 'pending'")
+        .run(now, cleanId);
+      if (Number(res.changes ?? 0) === 0) return null;
+      return rowToPendingRecord(row);
+    });
+  }
+
+  completePendingApproval(id: string, promotedMemoryId: string): PendingMemoryRecord {
+    const cleanId = id.trim();
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        "UPDATE pending_memories SET status = 'approved', promoted_memory_id = ?, updated_at = ? WHERE id = ?",
+      )
+      .run(promotedMemoryId, now, cleanId);
+    const row = this.db
+      .prepare("SELECT * FROM pending_memories WHERE id = ?")
+      .get<RawPendingRow>(cleanId);
+    if (!row) throw new Error(`Pending memory not found: ${cleanId}`);
+    return rowToPendingRecord(row);
+  }
+
+  revertPendingClaim(id: string): void {
+    const now = new Date().toISOString();
+    this.db
+      .prepare("UPDATE pending_memories SET status = 'pending', updated_at = ? WHERE id = ? AND status = 'approving'")
+      .run(now, id.trim());
+  }
+
+  dismissPendingMemory(id: string): PendingMemoryRecord {
+    const cleanId = id.trim();
+    const existing = this.getPendingMemory(cleanId);
+    if (!existing) {
+      throw new Error(`Pending memory not found: ${cleanId}`);
+    }
+    const now = new Date().toISOString();
+    this.db
+      .prepare("UPDATE pending_memories SET status = 'dismissed', updated_at = ? WHERE id = ?")
+      .run(now, cleanId);
+    return { ...existing, status: "dismissed", updatedAt: now };
   }
 
   close(): void {

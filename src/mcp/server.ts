@@ -21,7 +21,11 @@ import {
   summarizeToolCall,
   type AppPolicy,
 } from "../daemon/acl.ts";
-import type { AccessLogEntry, DaemonStateStore } from "../daemon/state.ts";
+import {
+  DaemonStateStore,
+  type AccessLogEntry,
+  type PendingStatus,
+} from "../daemon/state.ts";
 import { loadEnvFile } from "../env.ts";
 import {
   searchHybrid,
@@ -33,10 +37,13 @@ import {
 import { JiraNotConfiguredError } from "../jira/client.ts";
 import {
   addMemorySmart,
+  approvePendingMemory,
+  bootstrapContext,
   deleteMemory,
   findMemoryById,
   listMemories,
   MEMORY_CATEGORIES,
+  runDreamConsolidation,
   searchMemories,
   supersedeMemory,
   updateMemory,
@@ -995,6 +1002,281 @@ export function createBrainServer(options: BrainServerOptions = {}): McpServer {
         return {
           result: textResult(JSON.stringify(res, null, 2)),
           resultCount: 1,
+        };
+      }),
+  );
+
+  // --- Session Bootstrap, Pending Approval Queue & Consolidation (Milestone 4) ---
+
+  server.registerTool(
+    "bootstrap_context",
+    {
+      title: "Bootstrap session context",
+      description:
+        "Single-call, token-budgeted session-start briefing combining standing global preferences/profile, active project memories, project pack highlights, optional task-focused hybrid recall, and pending review queue count.",
+      inputSchema: {
+        project: z
+          .string()
+          .optional()
+          .describe("Optional git repo slug, path, or remote URL"),
+        task: z
+          .string()
+          .optional()
+          .describe("Optional current task description for semantic recall"),
+        max_chars: z
+          .number()
+          .int()
+          .min(800)
+          .max(32000)
+          .optional()
+          .describe("Character budget for briefing (default 6000)"),
+        include_global: z
+          .boolean()
+          .optional()
+          .describe("Include standing global profile/preferences (default true)"),
+      },
+    },
+    async (args) =>
+      runGuarded("bootstrap_context", args, async ({ vault, policy }) => {
+        if (policy && args.project) {
+          const slug = await resolveProjectSlug(vault, args.project);
+          assertScopeAccess(policy, "bootstrap_context", "read", "project", slug);
+        }
+        const briefing = await bootstrapContext(vault, {
+          project: args.project,
+          task: args.task,
+          maxChars: args.max_chars,
+          includeGlobal: args.include_global,
+          policy,
+          stateStore,
+          indexDbPath: options.indexDbPath,
+          embedder: options.embedder,
+        });
+        const hits =
+          briefing.globalMemories.length +
+          briefing.projectMemories.length +
+          briefing.taskMemoryHits.length +
+          briefing.taskNoteHits.length +
+          briefing.projectNotesIncluded.length;
+        return {
+          result: textResult(briefing.markdown),
+          resultCount: hits,
+        };
+      }),
+  );
+
+  async function withPendingStore<T>(
+    vault: string,
+    fn: (store: DaemonStateStore) => Promise<T> | T,
+  ): Promise<T> {
+    if (stateStore) return fn(stateStore);
+    const ephemeral = await DaemonStateStore.open(vault);
+    try {
+      return await fn(ephemeral);
+    } finally {
+      ephemeral.close();
+    }
+  }
+
+  server.registerTool(
+    "list_pending_memories",
+    {
+      title: "List pending captured memories",
+      description:
+        "List candidate memories passively captured from sessions awaiting approval or dismissal.",
+      inputSchema: {
+        status: z
+          .enum(["pending", "approved", "dismissed", "all"])
+          .optional()
+          .describe("Filter by status (default pending)"),
+        scope: z.enum(["global", "project"]).optional(),
+        project: z.string().optional(),
+        category: z.enum(MEMORY_CATEGORIES).optional(),
+        limit: z.number().int().min(1).max(200).optional(),
+      },
+    },
+    async (args) =>
+      runGuarded("list_pending_memories", args, async ({ vault, policy }) => {
+        const canonicalProject = args.project
+          ? await resolveProjectSlug(vault, args.project)
+          : undefined;
+        if (policy && canonicalProject) {
+          assertScopeAccess(policy, "list_pending_memories", "read", "project", canonicalProject);
+        }
+        const items = await withPendingStore(vault, (store) =>
+          store.listPendingMemories({
+            status: (args.status ?? "pending") as PendingStatus | "all",
+            scope: args.scope,
+            project: canonicalProject,
+            category: args.category as MemoryCategory | undefined,
+            limit: args.limit ?? 50,
+          }),
+        );
+        const visible = policy
+          ? items.filter((p) => canReadTarget(policy, p.scope, p.project))
+          : items;
+        return {
+          result: textResult(JSON.stringify({ count: visible.length, pending: visible }, null, 2)),
+          resultCount: visible.length,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "approve_pending_memory",
+    {
+      title: "Approve pending memory",
+      description:
+        "Promote a passively captured pending candidate into canonical vault Markdown (runs secret guard, semantic dedup, and SQLite index sync).",
+      inputSchema: {
+        id: z.string().trim().min(1).describe("Pending candidate ID (e.g. p_a1b2c3d4)"),
+        title: z.string().trim().min(1).optional(),
+        content: z.string().trim().min(1).optional(),
+        scope: z.enum(["global", "project"]).optional(),
+        project: z.string().optional(),
+        category: z.enum(MEMORY_CATEGORIES).optional(),
+        tags: z.array(z.string()).optional(),
+      },
+    },
+    async (args) =>
+      runGuarded("approve_pending_memory", args, async ({ vault, policy }) => {
+        const res = await withPendingStore(vault, async (store) => {
+          const existing = store.getPendingMemory(args.id);
+          if (!existing) {
+            throw new Error(`Pending memory not found: ${args.id}`);
+          }
+          const finalScope = args.scope ?? existing.scope;
+          const finalProject =
+            finalScope === "project"
+              ? await resolveProjectSlug(vault, args.project ?? existing.project ?? "")
+              : null;
+          if (policy) {
+            assertScopeAccess(
+              policy,
+              "approve_pending_memory",
+              "write",
+              existing.scope,
+              existing.project,
+            );
+            assertScopeAccess(
+              policy,
+              "approve_pending_memory",
+              "write",
+              finalScope,
+              finalProject,
+            );
+          }
+          return approvePendingMemory(vault, store, args.id, {
+            title: args.title,
+            content: args.content,
+            scope: finalScope,
+            project: finalProject ?? undefined,
+            category: args.category as MemoryCategory | undefined,
+            tags: args.tags,
+            app: resolveMemoryApp(),
+            indexDbPath: options.indexDbPath,
+            embedder: options.embedder,
+          });
+        });
+        if (policy && !canReadTarget(policy, res.promoted.memory.scope, res.promoted.memory.project)) {
+          return {
+            result: textResult(
+              JSON.stringify(
+                { ok: true, id: res.pending.id, path: res.promoted.memory.path },
+                null,
+                2,
+              ),
+            ),
+            resultCount: 1,
+          };
+        }
+        return {
+          result: textResult(JSON.stringify(res, null, 2)),
+          resultCount: 1,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "dismiss_pending_memory",
+    {
+      title: "Dismiss pending memory",
+      description:
+        "Dismiss a passively captured pending candidate so it is not promoted to the vault.",
+      inputSchema: {
+        id: z.string().trim().min(1).describe("Pending candidate ID (e.g. p_a1b2c3d4)"),
+      },
+    },
+    async (args) =>
+      runGuarded("dismiss_pending_memory", args, async ({ vault, policy }) => {
+        const dismissed = await withPendingStore(vault, (store) => {
+          const existing = store.getPendingMemory(args.id);
+          if (!existing) throw new Error(`Pending memory not found: ${args.id}`);
+          if (policy) {
+            assertScopeAccess(
+              policy,
+              "dismiss_pending_memory",
+              "write",
+              existing.scope,
+              existing.project,
+            );
+          }
+          return store.dismissPendingMemory(args.id);
+        });
+        return {
+          result: textResult(JSON.stringify(dismissed, null, 2)),
+          resultCount: 1,
+        };
+      }),
+  );
+
+  server.registerTool(
+    "consolidate_memories",
+    {
+      title: "Consolidate memories (dream)",
+      description:
+        "Run sleep-time memory consolidation & vault hygiene (dry-run preview by default; pass apply=true to consolidate duplicate clusters and losslessly archive stale superseded blocks).",
+      inputSchema: {
+        apply: z
+          .boolean()
+          .optional()
+          .describe("Apply consolidations & archive stale superseded memories (default false = dry-run)"),
+        project: z
+          .string()
+          .optional()
+          .describe("Optional git repo slug to scope consolidation"),
+        prune_days: z
+          .number()
+          .int()
+          .min(0)
+          .max(3650)
+          .optional()
+          .describe("Archive/prune superseded memories older than N days (default 90; 0 disables)"),
+      },
+    },
+    async (args) =>
+      runGuarded("consolidate_memories", args, async ({ vault, policy }) => {
+        if (policy && args.project) {
+          const slug = await resolveProjectSlug(vault, args.project);
+          assertScopeAccess(
+            policy,
+            "consolidate_memories",
+            args.apply === true ? "write" : "read",
+            "project",
+            slug,
+          );
+        }
+        const report = await runDreamConsolidation(vault, {
+          apply: args.apply === true,
+          project: args.project,
+          pruneDays: args.prune_days,
+          policy,
+          dbPath: options.indexDbPath,
+          embedder: options.embedder,
+        });
+        return {
+          result: textResult(JSON.stringify(report, null, 2)),
+          resultCount: report.duplicateClusters.length + report.conflicts.length,
         };
       }),
   );
