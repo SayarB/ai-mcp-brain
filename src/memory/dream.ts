@@ -11,6 +11,7 @@
  *  4. Dangling `superseded_by` references where the replacement ID no longer exists.
  *  5. Broken `[[wikilinks]]` from the local SQLite index.
  */
+import { constants as fsConstants } from "node:fs";
 import { lstat, mkdir, open, realpath } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
 import {
@@ -234,8 +235,24 @@ async function assertSafeArchiveTarget(vaultPath: string, absPath: string): Prom
   if (!rel || rel === ".." || rel.startsWith("../") || rel.startsWith("/")) {
     throw new Error(`Archive path escapes vault: ${absPath}`);
   }
-  // Verify existing parent directory doesn't symlink outside the vault
+  // Check deepest existing ancestor BEFORE mkdir so a symlinked directory can never create folders outside vault
   const dir = dirname(absPath);
+  let probe = dir;
+  while (true) {
+    try {
+      const realProbe = await realpath(probe);
+      const relProbe = relative(realVault, realProbe).replace(/\\/g, "/");
+      if (relProbe === ".." || relProbe.startsWith("../") || relProbe.startsWith("/")) {
+        throw new Error(`Archive directory escapes vault via symlink: ${probe}`);
+      }
+      break;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException)?.code !== "ENOENT") throw err;
+      const parent = dirname(probe);
+      if (parent === probe) break;
+      probe = parent;
+    }
+  }
   await mkdir(dir, { recursive: true });
   const realDir = await realpath(dir);
   const relDir = relative(realVault, realDir).replace(/\\/g, "/");
@@ -293,25 +310,29 @@ async function appendToScopedArchive(
       "",
     ].join("\n");
 
-    // Atomic create with O_EXCL ("wx"); fall back to append ("a") if the file already exists
+    // Atomic create with O_EXCL ("wx"); fall back to O_APPEND | O_NOFOLLOW if the file already exists
     let fh;
+    const appendFlags =
+      fsConstants.O_WRONLY |
+      fsConstants.O_APPEND |
+      (fsConstants.O_NOFOLLOW ?? 0);
     try {
       fh = await open(absPath, "wx", 0o644);
       await fh.writeFile(frontmatter, "utf8");
       await fh.sync();
     } catch (err) {
       if ((err as NodeJS.ErrnoException)?.code !== "EEXIST") throw err;
-      fh = await open(absPath, "a", 0o644);
+      fh = await open(absPath, appendFlags, 0o644);
       await fh.writeFile(`\n\n${blocks}\n`, "utf8");
       await fh.sync();
     } finally {
       await fh?.close();
     }
 
-    // Read-back verification before caller is allowed to delete source blocks
+    // Strict read-back verification (checking exact block markers) before caller deletes source blocks
     const verified = await readText(absPath);
     for (const m of memories) {
-      if (!verified.includes(`id=${m.id}`)) {
+      if (!verified.includes(`id=${m.id}`) || !verified.includes(`<!-- /mem:${m.id} -->`)) {
         throw new Error(
           `Archive verification failed: memory ${m.id} not found in ${relPath}; aborting prune.`,
         );

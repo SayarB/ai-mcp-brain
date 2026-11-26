@@ -31,15 +31,13 @@ if [[ -z "$repo_root" || "$repo_root" == "__BRAIN_REPO_ROOT__" || ! -f "$repo_ro
   exit 0
 fi
 
-run_cli() {
-  if command -v bun >/dev/null 2>&1; then
-    bun "$repo_root/src/cli.ts" "$@"
-  elif [[ -x "$repo_root/node_modules/.bin/tsx" ]]; then
-    "$repo_root/node_modules/.bin/tsx" "$repo_root/src/cli.ts" "$@"
-  else
-    npx --no-install tsx "$repo_root/src/cli.ts" "$@"
-  fi
-}
+if command -v bun >/dev/null 2>&1; then
+  cli_cmd=(bun "$repo_root/src/cli.ts")
+elif [[ -x "$repo_root/node_modules/.bin/tsx" ]]; then
+  cli_cmd=("$repo_root/node_modules/.bin/tsx" "$repo_root/src/cli.ts")
+else
+  cli_cmd=(npx --no-install tsx "$repo_root/src/cli.ts")
+fi
 
 run_with_timeout() {
   local secs="$1"
@@ -54,8 +52,8 @@ run_with_timeout() {
 cd "$repo_root" || exit 0
 if [[ "$kind" == "session-start" ]]; then
   # Print compact token-budgeted context briefing for SessionStart injection
-  run_with_timeout 8 run_cli bootstrap --no-embed --max-chars 3200 ${cwd:+--cwd "$cwd"} 2>/dev/null || true
+  run_with_timeout 8 "${cli_cmd[@]}" bootstrap --no-embed --max-chars 3200 ${cwd:+--cwd "$cwd"} 2>/dev/null || true
 elif [[ "$kind" == "session-end" && "${BRAIN_PASSIVE_CAPTURE:-1}" != "0" ]]; then
-  (run_with_timeout 10 run_cli capture --fail-open --app claude ${session:+--session "$session"} ${cwd:+--cwd "$cwd"} >/dev/null 2>&1 || true) &
+  (run_with_timeout 10 "${cli_cmd[@]}" capture --fail-open --app claude ${session:+--session "$session"} ${cwd:+--cwd "$cwd"} >/dev/null 2>&1 || true) &
 fi
 exit 0

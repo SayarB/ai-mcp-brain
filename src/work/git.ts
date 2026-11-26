@@ -33,7 +33,7 @@ export async function harvestDayCommits(
       "--no-show-signature",
     ];
     if (opts?.authorEmail?.trim()) {
-      args.push(`--author=${opts.authorEmail.trim()}`);
+      args.push("--fixed-strings", `--author=${opts.authorEmail.trim()}`);
     }
     const { stdout } = await execFileAsync("git", args, { cwd, timeout: 8_000 });
     const out: HarvestedCommit[] = [];

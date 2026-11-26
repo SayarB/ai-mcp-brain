@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { mkdtemp, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { describe, it } from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
@@ -11,7 +12,32 @@ import {
   startBrainDaemon,
 } from "../daemon/index.ts";
 import { syncVaultIndex, type Embedder } from "../index/index.ts";
-import { readText, writeText } from "../runtime.ts";
+import { globFiles, moduleDir, readText, writeText } from "../runtime.ts";
+
+function runBashWithStdin(
+  scriptPath: string,
+  args: string[],
+  stdinText: string,
+  env: NodeJS.ProcessEnv,
+): Promise<{ code: number | null; stdout: string; stderr: string }> {
+  return new Promise((resolveRun, rejectRun) => {
+    const child = spawn("bash", [scriptPath, ...args], {
+      env,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (d) => {
+      stdout += String(d);
+    });
+    child.stderr.on("data", (d) => {
+      stderr += String(d);
+    });
+    child.on("error", rejectRun);
+    child.on("close", (code) => resolveRun({ code, stdout, stderr }));
+    child.stdin.end(stdinText);
+  });
+}
 import {
   addMemoryRaw,
   approvePendingMemory,
@@ -709,6 +735,58 @@ describe("Milestone 4: bootstrap_context, passive capture queue & brain dream co
       } finally {
         await daemon.close();
       }
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("H1 regression: real Cursor and Claude hook templates execute CLI cleanly under timeout on Linux", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ai-mcp-brain-m4-hooks-"));
+    const vault = join(root, "vault");
+    const repoRoot = resolve(moduleDir(import.meta.url), "..", "..");
+    try {
+      await addMemoryRaw(vault, {
+        title: "Hook bootstrap sentinel",
+        content: "Prefer deterministic hooks verified by real shell execution.",
+        scope: "global",
+        category: "preferences",
+      });
+
+      const env = {
+        ...process.env,
+        BRAIN_REPO_ROOT: repoRoot,
+        BRAIN_VAULT: vault,
+        BRAIN_DAEMON_DB: join(root, "daemon.sqlite"),
+      };
+
+      // 1. Claude SessionStart hook must emit bootstrap briefing containing our seeded preference
+      const claudeHook = join(repoRoot, "templates", "hooks", "claude", "brain-hook.sh");
+      const claudeOut = await runBashWithStdin(
+        claudeHook,
+        ["session-start"],
+        JSON.stringify({ session_id: "claude-hook-s1", cwd: "" }),
+        env,
+      );
+      assert.equal(claudeOut.code, 0);
+      assert.ok(
+        claudeOut.stdout.includes("Hook bootstrap sentinel"),
+        `expected Claude SessionStart hook to print briefing, got: ${JSON.stringify(claudeOut.stdout)}`,
+      );
+
+      // 2. Cursor session-start hook must append a real work/log entry with parsed session_id under timeout
+      const cursorHook = join(repoRoot, "templates", "hooks", "cursor", "work-event.sh");
+      const cursorOut = await runBashWithStdin(
+        cursorHook,
+        ["session-start"],
+        JSON.stringify({ conversation_id: "cursor-hook-s1", cwd: "" }),
+        env,
+      );
+      assert.equal(cursorOut.code, 0);
+      const logs = await globFiles(vault, "work/log/*.md");
+      assert.equal(logs.length, 1, "expected Cursor hook to append a work/log/YYYY-MM-DD.md entry");
+      const logBody = await readText(join(vault, logs[0]!));
+      assert.ok(logBody.includes("session-start"));
+      assert.ok(logBody.includes("cursor-hook-s1"));
     } finally {
       await rm(root, { recursive: true, force: true });
     }
