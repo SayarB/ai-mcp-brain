@@ -167,7 +167,7 @@ async function acquireLockfile(lockPath: string): Promise<() => Promise<void>> {
   }
 }
 
-async function withFileLock<T>(absPath: string, fn: () => Promise<T>): Promise<T> {
+export async function withFileLock<T>(absPath: string, fn: () => Promise<T>): Promise<T> {
   const key = resolve(absPath);
   const prev = fileLocks.get(key) ?? Promise.resolve();
   let releaseInProcess!: () => void;
@@ -191,7 +191,7 @@ async function withFileLock<T>(absPath: string, fn: () => Promise<T>): Promise<T
   }
 }
 
-async function withFilesLock<T>(absPaths: string[], fn: () => Promise<T>): Promise<T> {
+export async function withFilesLock<T>(absPaths: string[], fn: () => Promise<T>): Promise<T> {
   const unique = [...new Set(absPaths.map((p) => resolve(p)))].sort();
   const runAt = (idx: number): Promise<T> => {
     if (idx >= unique.length) return fn();
@@ -895,6 +895,80 @@ export async function updateMemory(
     );
 
     return updatedMem;
+  });
+}
+
+/**
+ * Mark an existing active memory as superseded by another already-existing memory ID
+ * (used by `brain dream` duplicate consolidation without creating a redundant third block).
+ */
+export async function markMemorySupersededBy(
+  vaultPath: string,
+  oldId: string,
+  replacementId: string,
+): Promise<AtomicMemory> {
+  const cleanOld = oldId.trim();
+  const cleanRep = replacementId.trim();
+  if (!cleanOld || !cleanRep || cleanOld === cleanRep) {
+    throw new Error("oldId and replacementId must be distinct non-empty memory IDs");
+  }
+  const located = await findMemoryById(vaultPath, cleanOld);
+  if (!located) {
+    throw new Error(`Memory not found: ${cleanOld}`);
+  }
+  const repLocated = await findMemoryById(vaultPath, cleanRep);
+  if (!repLocated) {
+    throw new Error(`Replacement memory not found: ${cleanRep}`);
+  }
+
+  return withFilesLock([located.absPath, repLocated.absPath], async () => {
+    const repRaw = await readText(repLocated.absPath);
+    const repBlocks = parseMemoryFile(repLocated.relPath, repRaw.replace(/\r\n/g, "\n"));
+    const repHit = repBlocks.find((b) => b.memory.id === cleanRep);
+    if (!repHit) {
+      throw new Error(`Replacement memory not found: ${cleanRep}`);
+    }
+    if (repHit.memory.status !== "active") {
+      throw new Error(
+        `Replacement memory ${cleanRep} is not active (status=${repHit.memory.status}).`,
+      );
+    }
+
+    const raw = await readText(located.absPath);
+    const eol = detectEol(raw);
+    const lf = raw.replace(/\r\n/g, "\n");
+    const blocks = parseMemoryFile(located.relPath, lf);
+    const hit = blocks.find((b) => b.memory.id === cleanOld);
+    if (!hit) {
+      throw new Error(`Memory not found: ${cleanOld}`);
+    }
+    if (hit.memory.status === "superseded") {
+      throw new Error(
+        `Memory ${hit.memory.id} is already superseded${
+          hit.memory.supersededBy ? ` by ${hit.memory.supersededBy}` : ""
+        }.`,
+      );
+    }
+
+    const date = todayIso();
+    const updated: AtomicMemory = {
+      ...hit.memory,
+      status: "superseded",
+      supersededBy: cleanRep,
+      updated: date,
+    };
+    const lines = lf.split("\n");
+    const nextLf = spliceLinesCleanly(
+      lines,
+      hit.startLine,
+      hit.endLine,
+      renderMemoryBlock(updated).split("\n"),
+    );
+    await writeTextAtomic(
+      located.absPath,
+      applyEol(bumpFrontmatterUpdated(nextLf, date), eol),
+    );
+    return updated;
   });
 }
 

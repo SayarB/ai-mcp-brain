@@ -12,9 +12,13 @@ import { searchHybrid, syncVaultIndex, type SearchMode } from "./index/index.ts"
 import { formatInitReport, initVault } from "./init.ts";
 import {
   addMemorySmart,
+  approvePendingMemory,
+  bootstrapContext,
   deleteMemory,
+  ingestSessionToPending,
   listMemories,
   MEMORY_CATEGORIES,
+  runDreamConsolidation,
   searchMemories,
   supersedeMemory,
   updateMemory,
@@ -43,6 +47,10 @@ type Command =
   | "inject"
   | "daemon"
   | "acl"
+  | "bootstrap"
+  | "capture"
+  | "pending"
+  | "dream"
   | "reindex"
   | "search"
   | "memory"
@@ -79,6 +87,14 @@ Advanced:
                           Run hybrid search from the terminal
   memory <add|list|search|update|supersede|delete> [options]
                           Manage atomic ID-tracked memories in Markdown
+  bootstrap [--project <slug>] [--cwd <dir>] [--task <text>] [--max-chars N]
+                          Print a token-budgeted session-start context briefing
+  capture [--project <slug>] [--cwd <dir>] [--app <name>] [--session <id>] [--text <text>] [--stdin]
+                          Passively extract & stage candidate memories into Pending Queue
+  pending <list|approve|dismiss> [id]
+                          Review, approve (promote), or dismiss pending captured memories
+  dream [--project <slug>] [--apply] [--prune-days 90] [--no-embed]
+                          Consolidate duplicate memories & archive stale superseded blocks (dry-run default)
   ingest                  (planned) promote external/ drops
   work-event              Append a day-log event (harness-agnostic capture)
   help
@@ -125,7 +141,11 @@ function parseArgs(argv: string[]): {
       arg === "--no-embed" ||
       arg === "--no-warmup" ||
       arg === "--no-watch" ||
-      arg === "--allow-remote"
+      arg === "--allow-remote" ||
+      arg === "--apply" ||
+      arg === "--stdin" ||
+      arg === "--no-global" ||
+      arg === "--fail-open"
     ) {
       flags[arg.slice(2)] = "true";
       continue;
@@ -693,6 +713,178 @@ async function cmdMemory(
   }
 }
 
+async function readStdinText(): Promise<string> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of process.stdin) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+async function cmdBootstrap(
+  positionals: string[],
+  pathOverride: string | undefined,
+  flags: Record<string, string>,
+): Promise<void> {
+  await loadEnvFile(join(configDir(), ".env"));
+  const config = await loadConfig();
+  const vault = resolveVaultPath(config.vault_path, pathOverride);
+  // Pass full cwd so _meta/projects-index.md path overrides match identically to `brain capture`
+  const project = flags.project || flags.cwd || undefined;
+  const task = flags.task || positionals.join(" ").trim() || undefined;
+  const maxChars = flags["max-chars"] ? Number(flags["max-chars"]) : undefined;
+  const embedder = flags["no-embed"] === "true" ? null : undefined;
+
+  const store = await DaemonStateStore.open(vault).catch(() => undefined);
+  try {
+    const res = await bootstrapContext(vault, {
+      project,
+      task,
+      maxChars: maxChars && Number.isFinite(maxChars) ? maxChars : undefined,
+      includeGlobal: flags["no-global"] !== "true",
+      stateStore: store,
+      embedder,
+    });
+    console.log(res.markdown);
+  } finally {
+    store?.close();
+  }
+}
+
+async function cmdCapture(
+  positionals: string[],
+  pathOverride: string | undefined,
+  flags: Record<string, string>,
+): Promise<void> {
+  try {
+    await loadEnvFile(join(configDir(), ".env"));
+    const config = await loadConfig();
+    const vault = resolveVaultPath(config.vault_path, pathOverride);
+    const stdinText = flags.stdin === "true" ? await readStdinText() : "";
+    const summary = [flags.text, positionals.join(" ").trim(), stdinText]
+      .filter(Boolean)
+      .join("\n")
+      .trim();
+
+    const store = await DaemonStateStore.open(vault);
+    try {
+      const res = await ingestSessionToPending(vault, store, {
+        summary: summary || undefined,
+        cwd: flags.cwd,
+        project: flags.project,
+        app: flags.app ?? "hook",
+        session: flags.session,
+      });
+      console.log(JSON.stringify(res, null, 2));
+    } finally {
+      store.close();
+    }
+  } catch (err) {
+    // Fail open when called from hooks (--fail-open or default hook app)
+    console.error(err instanceof Error ? err.message : String(err));
+    process.exitCode = flags["fail-open"] === "true" || flags.app === "hook" ? 0 : 1;
+  }
+}
+
+async function cmdPending(
+  positionals: string[],
+  pathOverride: string | undefined,
+  flags: Record<string, string>,
+): Promise<void> {
+  await loadEnvFile(join(configDir(), ".env"));
+  const config = await loadConfig();
+  const vault = resolveVaultPath(config.vault_path, pathOverride);
+  const [sub, idRaw] = positionals;
+  const store = await DaemonStateStore.open(vault);
+  try {
+    switch (sub ?? "list") {
+      case "list": {
+        const status =
+          flags.status === "approved" ||
+          flags.status === "dismissed" ||
+          flags.status === "approving" ||
+          flags.status === "all"
+            ? flags.status
+            : "pending";
+        const items = store.listPendingMemories({
+          status,
+          project: flags.project,
+          limit: flags.limit ? Number(flags.limit) : 50,
+        });
+        console.log(JSON.stringify({ count: items.length, pending: items }, null, 2));
+        break;
+      }
+      case "approve": {
+        const id = flags.id || idRaw;
+        if (!id) {
+          console.error(
+            "Usage: brain pending approve <id> [--title <t>] [--scope global|project] [--project <slug>] [--category <c>] [--tags a,b]",
+          );
+          process.exitCode = 1;
+          return;
+        }
+        const category = flags.category as MemoryCategory | undefined;
+        if (category && !(MEMORY_CATEGORIES as readonly string[]).includes(category)) {
+          console.error(`Unknown --category: ${category}`);
+          process.exitCode = 1;
+          return;
+        }
+        const scope = parseOptionalScope(flags.scope) ?? (flags.project ? "project" : undefined);
+        const res = await approvePendingMemory(vault, store, id, {
+          title: flags.title,
+          content: flags.content,
+          scope,
+          project: flags.project,
+          category,
+          tags: parseTagList(flags.tags),
+          embedder: flags["no-embed"] === "true" ? null : undefined,
+        });
+        console.log(JSON.stringify(res, null, 2));
+        break;
+      }
+      case "dismiss": {
+        const id = flags.id || idRaw;
+        if (!id) {
+          console.error("Usage: brain pending dismiss <id>");
+          process.exitCode = 1;
+          return;
+        }
+        const res = store.dismissPendingMemory(id);
+        console.log(JSON.stringify(res, null, 2));
+        break;
+      }
+      default:
+        console.error("Usage: brain pending <list|approve|dismiss> [id]");
+        process.exitCode = 1;
+    }
+  } finally {
+    store.close();
+  }
+}
+
+async function cmdDream(
+  pathOverride: string | undefined,
+  flags: Record<string, string>,
+): Promise<void> {
+  await loadEnvFile(join(configDir(), ".env"));
+  const config = await loadConfig();
+  const vault = resolveVaultPath(config.vault_path, pathOverride);
+  const pruneDays =
+    flags["prune-days"] !== undefined ? Number(flags["prune-days"]) : undefined;
+  if (pruneDays !== undefined && (!Number.isInteger(pruneDays) || pruneDays < 0)) {
+    console.error(`Invalid --prune-days: ${flags["prune-days"]}`);
+    process.exitCode = 1;
+    return;
+  }
+  const report = await runDreamConsolidation(vault, {
+    apply: flags.apply === "true",
+    project: flags.project,
+    pruneDays,
+    embedder: flags["no-embed"] === "true" ? null : undefined,
+  });
+  console.log(JSON.stringify(report, null, 2));
+}
+
 async function main(): Promise<void> {
   const { command, path, target, positionals, flags } = parseArgs(processArgs());
 
@@ -714,6 +906,18 @@ async function main(): Promise<void> {
       break;
     case "acl":
       await cmdAcl(positionals, path, flags);
+      break;
+    case "bootstrap":
+      await cmdBootstrap(positionals, path, flags);
+      break;
+    case "capture":
+      await cmdCapture(positionals, path, flags);
+      break;
+    case "pending":
+      await cmdPending(positionals, path, flags);
+      break;
+    case "dream":
+      await cmdDream(path, flags);
       break;
     case "reindex":
       await cmdReindex(path, flags);

@@ -2,7 +2,7 @@
 
 Vault: `{{VAULT_PATH}}`
 
-MCP: `resolve_action` · `list_actions` · `resolve_guidance` · `list_guidance` · `upsert_guidance` · `search_notes` · `read_note` · `remember` · `add_memory` · `search_memory` · `list_memories` · `update_memory` · `supersede_memory` · `delete_memory` · `get_project_context` · `list_recent` · `track_tool` · `vault_info` · `jira_assigned` · `work_today` · `work_plate`
+MCP: `bootstrap_context` · `resolve_action` · `list_actions` · `resolve_guidance` · `list_guidance` · `upsert_guidance` · `search_notes` · `read_note` · `remember` · `add_memory` · `search_memory` · `list_memories` · `update_memory` · `supersede_memory` · `delete_memory` · `list_pending_memories` · `approve_pending_memory` · `dismiss_pending_memory` · `consolidate_memories` · `get_project_context` · `list_recent` · `track_tool` · `vault_info` · `jira_assigned` · `work_today` · `work_plate`
 
 Full policy: repo `templates/prompts/agent-memory.md`.
 

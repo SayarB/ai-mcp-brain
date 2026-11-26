@@ -11,6 +11,7 @@ export {
   generateMemoryId,
   listMemories,
   listMemoryFiles,
+  markMemorySupersededBy,
   MEMORY_CATEGORIES,
   memoryTargetPath,
   parseMemoryFile,
@@ -40,3 +41,26 @@ export {
   type SearchMemoriesOptions,
   type SimilarCandidate,
 } from "./extract.ts";
+export {
+  bootstrapContext,
+  type BootstrapContextOptions,
+  type BootstrapContextResult,
+} from "./bootstrap.ts";
+export {
+  approvePendingMemory,
+  extractSessionCandidates,
+  ingestSessionToPending,
+  type ApprovePendingOverrides,
+  type ExtractedCandidate,
+  type SessionIngestInput,
+  type SessionIngestResult,
+} from "./capture.ts";
+export {
+  runDreamConsolidation,
+  type ConflictPair,
+  type DanglingLinkItem,
+  type DreamOptions,
+  type DreamReport,
+  type DuplicateCluster,
+  type StaleSupersededItem,
+} from "./dream.ts";
