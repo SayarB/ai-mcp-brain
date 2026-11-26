@@ -29,6 +29,7 @@ export const REGISTERED_TOOL_NAMES = [
   "list_pending_memories",
   "approve_pending_memory",
   "dismiss_pending_memory",
+  "ingest_session",
   "consolidate_memories",
   "list_recent",
   "track_tool",
@@ -260,6 +261,7 @@ const WRITE_TOOLS = new Set([
   "delete_memory",
   "approve_pending_memory",
   "dismiss_pending_memory",
+  "ingest_session",
   "track_tool",
   "upsert_guidance",
 ]);

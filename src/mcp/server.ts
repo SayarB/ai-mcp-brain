@@ -1103,18 +1103,16 @@ export function createBrainServer(options: BrainServerOptions = {}): McpServer {
         if (policy && canonicalProject) {
           assertScopeAccess(policy, "list_pending_memories", "read", "project", canonicalProject);
         }
-        const items = await withPendingStore(vault, (store) =>
+        const visible = await withPendingStore(vault, (store) =>
           store.listPendingMemories({
             status: (args.status ?? "pending") as PendingStatus | "all",
             scope: args.scope,
             project: canonicalProject,
             category: args.category as MemoryCategory | undefined,
             limit: args.limit ?? 50,
+            policy,
           }),
         );
-        const visible = policy
-          ? items.filter((p) => canReadTarget(policy, p.scope, p.project))
-          : items;
         return {
           result: textResult(JSON.stringify({ count: visible.length, pending: visible }, null, 2)),
           resultCount: visible.length,
@@ -1146,9 +1144,13 @@ export function createBrainServer(options: BrainServerOptions = {}): McpServer {
             throw new Error(`Pending memory not found: ${args.id}`);
           }
           const finalScope = args.scope ?? existing.scope;
+          const rawFinalProject = (args.project ?? existing.project ?? "").trim();
+          if (finalScope === "project" && !rawFinalProject) {
+            throw new Error("project is required when changing scope to project");
+          }
           const finalProject =
             finalScope === "project"
-              ? await resolveProjectSlug(vault, args.project ?? existing.project ?? "")
+              ? await resolveProjectSlug(vault, rawFinalProject)
               : null;
           if (policy) {
             assertScopeAccess(

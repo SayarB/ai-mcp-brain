@@ -35,7 +35,7 @@ import {
   removeOrchestoSkills,
   updateOrchesto,
 } from "./orchesto-skills.ts";
-import { basename, join } from "node:path";
+import { join } from "node:path";
 import { isMainModule, processArgs } from "./runtime.ts";
 import { runSetup } from "./setup.ts";
 import { appendEvent } from "./work/ledger.ts";
@@ -144,7 +144,8 @@ function parseArgs(argv: string[]): {
       arg === "--allow-remote" ||
       arg === "--apply" ||
       arg === "--stdin" ||
-      arg === "--no-global"
+      arg === "--no-global" ||
+      arg === "--fail-open"
     ) {
       flags[arg.slice(2)] = "true";
       continue;
@@ -728,8 +729,8 @@ async function cmdBootstrap(
   await loadEnvFile(join(configDir(), ".env"));
   const config = await loadConfig();
   const vault = resolveVaultPath(config.vault_path, pathOverride);
-  const project =
-    flags.project || (flags.cwd ? basename(flags.cwd) : undefined);
+  // Pass full cwd so _meta/projects-index.md path overrides match identically to `brain capture`
+  const project = flags.project || flags.cwd || undefined;
   const task = flags.task || positionals.join(" ").trim() || undefined;
   const maxChars = flags["max-chars"] ? Number(flags["max-chars"]) : undefined;
   const embedder = flags["no-embed"] === "true" ? null : undefined;
@@ -779,9 +780,9 @@ async function cmdCapture(
       store.close();
     }
   } catch (err) {
-    // Fail open when called from hooks
+    // Fail open when called from hooks (--fail-open or default hook app)
     console.error(err instanceof Error ? err.message : String(err));
-    process.exitCode = flags.app === "hook" ? 0 : 1;
+    process.exitCode = flags["fail-open"] === "true" || flags.app === "hook" ? 0 : 1;
   }
 }
 
@@ -799,7 +800,10 @@ async function cmdPending(
     switch (sub ?? "list") {
       case "list": {
         const status =
-          flags.status === "approved" || flags.status === "dismissed" || flags.status === "all"
+          flags.status === "approved" ||
+          flags.status === "dismissed" ||
+          flags.status === "approving" ||
+          flags.status === "all"
             ? flags.status
             : "pending";
         const items = store.listPendingMemories({
@@ -813,7 +817,9 @@ async function cmdPending(
       case "approve": {
         const id = flags.id || idRaw;
         if (!id) {
-          console.error("Usage: brain pending approve <id> [--title <t>] [--category <c>] [--project <slug>]");
+          console.error(
+            "Usage: brain pending approve <id> [--title <t>] [--scope global|project] [--project <slug>] [--category <c>] [--tags a,b]",
+          );
           process.exitCode = 1;
           return;
         }
@@ -823,11 +829,14 @@ async function cmdPending(
           process.exitCode = 1;
           return;
         }
+        const scope = parseOptionalScope(flags.scope) ?? (flags.project ? "project" : undefined);
         const res = await approvePendingMemory(vault, store, id, {
           title: flags.title,
           content: flags.content,
+          scope,
           project: flags.project,
           category,
+          tags: parseTagList(flags.tags),
           embedder: flags["no-embed"] === "true" ? null : undefined,
         });
         console.log(JSON.stringify(res, null, 2));

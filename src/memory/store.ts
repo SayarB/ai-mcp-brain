@@ -167,7 +167,7 @@ async function acquireLockfile(lockPath: string): Promise<() => Promise<void>> {
   }
 }
 
-async function withFileLock<T>(absPath: string, fn: () => Promise<T>): Promise<T> {
+export async function withFileLock<T>(absPath: string, fn: () => Promise<T>): Promise<T> {
   const key = resolve(absPath);
   const prev = fileLocks.get(key) ?? Promise.resolve();
   let releaseInProcess!: () => void;
@@ -191,7 +191,7 @@ async function withFileLock<T>(absPath: string, fn: () => Promise<T>): Promise<T
   }
 }
 
-async function withFilesLock<T>(absPaths: string[], fn: () => Promise<T>): Promise<T> {
+export async function withFilesLock<T>(absPaths: string[], fn: () => Promise<T>): Promise<T> {
   const unique = [...new Set(absPaths.map((p) => resolve(p)))].sort();
   const runAt = (idx: number): Promise<T> => {
     if (idx >= unique.length) return fn();
@@ -921,7 +921,19 @@ export async function markMemorySupersededBy(
     throw new Error(`Replacement memory not found: ${cleanRep}`);
   }
 
-  return withFileLock(located.absPath, async () => {
+  return withFilesLock([located.absPath, repLocated.absPath], async () => {
+    const repRaw = await readText(repLocated.absPath);
+    const repBlocks = parseMemoryFile(repLocated.relPath, repRaw.replace(/\r\n/g, "\n"));
+    const repHit = repBlocks.find((b) => b.memory.id === cleanRep);
+    if (!repHit) {
+      throw new Error(`Replacement memory not found: ${cleanRep}`);
+    }
+    if (repHit.memory.status !== "active") {
+      throw new Error(
+        `Replacement memory ${cleanRep} is not active (status=${repHit.memory.status}).`,
+      );
+    }
+
     const raw = await readText(located.absPath);
     const eol = detectEol(raw);
     const lf = raw.replace(/\r\n/g, "\n");

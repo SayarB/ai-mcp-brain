@@ -52,9 +52,13 @@ import {
 import { isMainModule } from "../runtime.ts";
 import { vaultInfo } from "../vault.ts";
 import {
+  AclDeniedError,
+  canReadTarget,
   canWriteTarget,
+  checkToolAccess,
   normalizeAppNameOrDefault,
   normalizeDeniedToolList,
+  redactLogSummary,
   validateAppName,
   type AccessMode,
   type AppPolicyPatch,
@@ -62,6 +66,7 @@ import {
 } from "./acl.ts";
 import {
   DaemonStateStore,
+  PendingStateConflictError,
   type AccessLogEntry,
   type AccessStatus,
   type PendingStatus,
@@ -943,6 +948,7 @@ export async function startBrainDaemon(
 
     // POST /api/ingest-session — passive capture into Pending Approval Queue
     if (pathname === "/api/ingest-session" && method === "POST") {
+      const started = Date.now();
       let body: unknown;
       try {
         body = await readJsonBody(req);
@@ -972,11 +978,31 @@ export async function startBrainDaemon(
       }
 
       const policy = stateStore.getEffectivePolicy(effectiveApp);
-      if (pinnedApp && (!policy.enabled || policy.mode !== "read-write")) {
-        sendJson(res, 403, {
-          error: `ACL denied: app "${effectiveApp}" does not have write permission to ingest sessions`,
-        });
-        return;
+      const project = typeof b.project === "string" && b.project.trim() ? b.project.trim() : undefined;
+      const logSummary = redactLogSummary(
+        project ? `ingest project=${project}` : "ingest session",
+      );
+
+      if (pinnedApp) {
+        try {
+          checkToolAccess(policy, "ingest_session", "write");
+        } catch (err) {
+          const reason = err instanceof AclDeniedError ? err.reason : "ACL denied";
+          const entry = stateStore.recordAccess({
+            app: effectiveApp,
+            tool: "ingest_session",
+            operation: "write",
+            status: "denied",
+            summary: `${logSummary} — ${reason}`,
+            resultCount: 0,
+            durationMs: Date.now() - started,
+          });
+          onAccessEvent(entry);
+          sendJson(res, 403, {
+            error: err instanceof Error ? err.message : "ACL denied",
+          });
+          return;
+        }
       }
 
       const summary = typeof b.summary === "string" ? b.summary : undefined;
@@ -986,7 +1012,6 @@ export async function startBrainDaemon(
         : undefined;
       // Restrict arbitrary cwd git execution to admin callers; per-app tokens pass summary/transcript/commits directly
       const cwd = !pinnedApp && typeof b.cwd === "string" && b.cwd.trim() ? b.cwd.trim() : undefined;
-      const project = typeof b.project === "string" && b.project.trim() ? b.project.trim() : undefined;
       const session = typeof b.session === "string" && b.session.trim() ? b.session.trim() : undefined;
       const maxCandidates =
         typeof b.maxCandidates === "number" && Number.isFinite(b.maxCandidates)
@@ -1006,12 +1031,35 @@ export async function startBrainDaemon(
           allowCandidate: pinnedApp
             ? (cand) => canWriteTarget(policy, cand.scope, cand.project)
             : undefined,
+          canReadScope: pinnedApp
+            ? (sc, proj) => canReadTarget(policy, sc, proj)
+            : undefined,
         });
+        const entry = stateStore.recordAccess({
+          app: effectiveApp,
+          tool: "ingest_session",
+          operation: "write",
+          status: "ok",
+          summary: `${logSummary} (staged=${result.staged.length})`,
+          resultCount: result.staged.length,
+          durationMs: Date.now() - started,
+        });
+        onAccessEvent(entry);
         if (result.staged.length > 0) {
           broadcastEvent("pending", { count: stateStore.countPendingMemories(), staged: result.staged.length });
         }
         sendJson(res, 200, result);
       } catch (err) {
+        const entry = stateStore.recordAccess({
+          app: effectiveApp,
+          tool: "ingest_session",
+          operation: "write",
+          status: "error",
+          summary: `${logSummary} — ${err instanceof Error ? err.message : String(err)}`,
+          resultCount: 0,
+          durationMs: Date.now() - started,
+        });
+        onAccessEvent(entry);
         sendJson(res, 400, { error: err instanceof Error ? err.message : String(err) });
       }
       return;
@@ -1078,7 +1126,12 @@ export async function startBrainDaemon(
         broadcastEvent("pending", { count: stateStore.countPendingMemories(), approved: id });
         sendJson(res, 200, result);
       } catch (err) {
-        const status = err instanceof SecretDetectedError ? 422 : 400;
+        const status =
+          err instanceof PendingStateConflictError
+            ? 409
+            : err instanceof SecretDetectedError
+              ? 422
+              : 400;
         sendJson(res, status, { error: err instanceof Error ? err.message : String(err) });
       }
       return;
@@ -1093,7 +1146,8 @@ export async function startBrainDaemon(
         broadcastEvent("pending", { count: stateStore.countPendingMemories(), dismissed: id });
         sendJson(res, 200, { pending: dismissed });
       } catch (err) {
-        sendJson(res, 404, { error: err instanceof Error ? err.message : String(err) });
+        const status = err instanceof PendingStateConflictError ? 409 : 404;
+        sendJson(res, status, { error: err instanceof Error ? err.message : String(err) });
       }
       return;
     }

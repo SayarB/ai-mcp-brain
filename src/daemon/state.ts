@@ -70,7 +70,19 @@ export type AccessLogQuery = {
   beforeId?: number;
 };
 
-export type PendingStatus = "pending" | "approved" | "dismissed";
+export type PendingStatus = "pending" | "approving" | "approved" | "dismissed";
+
+export class PendingStateConflictError extends Error {
+  readonly pendingId: string;
+  readonly currentStatus: PendingStatus;
+
+  constructor(pendingId: string, currentStatus: PendingStatus, action: string) {
+    super(`Cannot ${action} pending memory ${pendingId}: current status is "${currentStatus}".`);
+    this.name = "PendingStateConflictError";
+    this.pendingId = pendingId;
+    this.currentStatus = currentStatus;
+  }
+}
 
 export type PendingMemoryInput = {
   title: string;
@@ -110,6 +122,8 @@ export type PendingMemoryQuery = {
   category?: MemoryCategory;
   app?: string;
   limit?: number;
+  /** Optional ACL push-down filter applied in SQL before LIMIT/COUNT. */
+  policy?: AppPolicy | null;
 };
 
 export type AppWithStats = AppRecord & {
@@ -236,7 +250,9 @@ type RawPendingRow = {
 
 function rowToPendingRecord(row: RawPendingRow): PendingMemoryRecord {
   const status: PendingStatus =
-    row.status === "approved" || row.status === "dismissed" ? row.status : "pending";
+    row.status === "approving" || row.status === "approved" || row.status === "dismissed"
+      ? row.status
+      : "pending";
   const scope: MemoryScope = row.scope === "project" ? "project" : "global";
   const category: MemoryCategory = (MEMORY_CATEGORIES as readonly string[]).includes(row.category)
     ? (row.category as MemoryCategory)
@@ -694,7 +710,7 @@ export class DaemonStateStore {
         ? Math.min(1, Math.max(0, Math.round(input.confidence * 100) / 100))
         : 0.7;
 
-    const id = `p_${randomBytes(4).toString("hex")}`;
+    const id = `p_${randomBytes(6).toString("hex")}`;
     const now = new Date().toISOString();
     this.db
       .prepare(
@@ -745,9 +761,46 @@ export class DaemonStateStore {
     return row ? rowToPendingRecord(row) : null;
   }
 
+  private buildPendingAclWhere(policy: AppPolicy | null | undefined, where: string[], params: SqlValue[]): boolean {
+    if (!policy) return true;
+    if (!policy.enabled || policy.mode === "disabled") return false;
+    const clauses: string[] = [];
+    if (policy.readScopes.includes("global")) {
+      clauses.push("scope = 'global'");
+    }
+    if (policy.readScopes.includes("project")) {
+      if (policy.allowedProjects.length === 0) {
+        clauses.push("scope = 'project'");
+      } else {
+        const placeholders = policy.allowedProjects.map(() => "?").join(", ");
+        clauses.push(`(scope = 'project' AND project IN (${placeholders}))`);
+        params.push(...policy.allowedProjects);
+      }
+    }
+    if (!clauses.length) return false;
+    where.push(`(${clauses.join(" OR ")})`);
+    return true;
+  }
+
+  /** Reclaim rows stuck in `approving` past the stale TTL (e.g. process crash mid-promotion). */
+  reclaimStaleApproving(staleAfterMs = 5 * 60 * 1000): number {
+    const cutoff = new Date(Date.now() - Math.max(0, staleAfterMs)).toISOString();
+    const now = new Date().toISOString();
+    const res = this.db
+      .prepare(
+        "UPDATE pending_memories SET status = 'pending', updated_at = ? WHERE status = 'approving' AND updated_at <= ?",
+      )
+      .run(now, cutoff);
+    return Number(res.changes ?? 0);
+  }
+
   listPendingMemories(query?: PendingMemoryQuery): PendingMemoryRecord[] {
+    this.reclaimStaleApproving();
     const where: string[] = [];
     const params: SqlValue[] = [];
+    if (!this.buildPendingAclWhere(query?.policy, where, params)) {
+      return [];
+    }
     const status = query?.status ?? "pending";
     if (status !== "all") {
       where.push("status = ?");
@@ -783,43 +836,64 @@ export class DaemonStateStore {
     return rows.map(rowToPendingRecord);
   }
 
-  countPendingMemories(): number {
+  countPendingMemories(policy?: AppPolicy | null): number {
+    this.reclaimStaleApproving();
+    const where = ["status = 'pending'"];
+    const params: SqlValue[] = [];
+    if (!this.buildPendingAclWhere(policy, where, params)) {
+      return 0;
+    }
     const row = this.db
-      .prepare("SELECT COUNT(*) AS c FROM pending_memories WHERE status = 'pending'")
-      .get<{ c: number }>();
+      .prepare(`SELECT COUNT(*) AS c FROM pending_memories WHERE ${where.join(" AND ")}`)
+      .get<{ c: number }>(...params);
     return Number(row?.c ?? 0);
   }
 
-  /** Atomically claim a pending row for promotion (prevents concurrent double-approval). */
-  claimPendingMemory(id: string): PendingMemoryRecord | null {
+  /** Atomically claim a pending row (or stale crashed `approving` row) for promotion. */
+  claimPendingMemory(
+    id: string,
+    opts?: { staleAfterMs?: number },
+  ): PendingMemoryRecord | null {
     const cleanId = id.trim();
+    const staleAfterMs = opts?.staleAfterMs ?? 5 * 60 * 1000;
+    const cutoff = new Date(Date.now() - Math.max(0, staleAfterMs)).toISOString();
     const now = new Date().toISOString();
     return this.db.transaction(() => {
       const row = this.db
-        .prepare("SELECT * FROM pending_memories WHERE id = ? AND status = 'pending'")
-        .get<RawPendingRow>(cleanId);
+        .prepare(
+          "SELECT * FROM pending_memories WHERE id = ? AND (status = 'pending' OR (status = 'approving' AND updated_at <= ?))",
+        )
+        .get<RawPendingRow>(cleanId, cutoff);
       if (!row) return null;
       const res = this.db
-        .prepare("UPDATE pending_memories SET status = 'approving', updated_at = ? WHERE id = ? AND status = 'pending'")
-        .run(now, cleanId);
+        .prepare(
+          "UPDATE pending_memories SET status = 'approving', updated_at = ? WHERE id = ? AND (status = 'pending' OR (status = 'approving' AND updated_at <= ?))",
+        )
+        .run(now, cleanId, cutoff);
       if (Number(res.changes ?? 0) === 0) return null;
-      return rowToPendingRecord(row);
+      return rowToPendingRecord({ ...row, status: "approving", updated_at: now });
     });
   }
 
   completePendingApproval(id: string, promotedMemoryId: string): PendingMemoryRecord {
     const cleanId = id.trim();
     const now = new Date().toISOString();
-    this.db
-      .prepare(
-        "UPDATE pending_memories SET status = 'approved', promoted_memory_id = ?, updated_at = ? WHERE id = ?",
-      )
-      .run(promotedMemoryId, now, cleanId);
-    const row = this.db
-      .prepare("SELECT * FROM pending_memories WHERE id = ?")
-      .get<RawPendingRow>(cleanId);
-    if (!row) throw new Error(`Pending memory not found: ${cleanId}`);
-    return rowToPendingRecord(row);
+    return this.db.transaction(() => {
+      const res = this.db
+        .prepare(
+          "UPDATE pending_memories SET status = 'approved', promoted_memory_id = ?, updated_at = ? WHERE id = ? AND status = 'approving'",
+        )
+        .run(promotedMemoryId, now, cleanId);
+      const row = this.db
+        .prepare("SELECT * FROM pending_memories WHERE id = ?")
+        .get<RawPendingRow>(cleanId);
+      if (!row) throw new Error(`Pending memory not found: ${cleanId}`);
+      if (Number(res.changes ?? 0) === 0) {
+        const current = rowToPendingRecord(row);
+        throw new PendingStateConflictError(cleanId, current.status, "complete approval for");
+      }
+      return rowToPendingRecord(row);
+    });
   }
 
   revertPendingClaim(id: string): void {
@@ -831,15 +905,25 @@ export class DaemonStateStore {
 
   dismissPendingMemory(id: string): PendingMemoryRecord {
     const cleanId = id.trim();
-    const existing = this.getPendingMemory(cleanId);
-    if (!existing) {
-      throw new Error(`Pending memory not found: ${cleanId}`);
-    }
     const now = new Date().toISOString();
-    this.db
-      .prepare("UPDATE pending_memories SET status = 'dismissed', updated_at = ? WHERE id = ?")
-      .run(now, cleanId);
-    return { ...existing, status: "dismissed", updatedAt: now };
+    return this.db.transaction(() => {
+      const res = this.db
+        .prepare(
+          "UPDATE pending_memories SET status = 'dismissed', updated_at = ? WHERE id = ? AND status = 'pending'",
+        )
+        .run(now, cleanId);
+      const row = this.db
+        .prepare("SELECT * FROM pending_memories WHERE id = ?")
+        .get<RawPendingRow>(cleanId);
+      if (!row) {
+        throw new Error(`Pending memory not found: ${cleanId}`);
+      }
+      if (Number(res.changes ?? 0) === 0) {
+        const current = rowToPendingRecord(row);
+        throw new PendingStateConflictError(cleanId, current.status, "dismiss");
+      }
+      return rowToPendingRecord(row);
+    });
   }
 
   close(): void {

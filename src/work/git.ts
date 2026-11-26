@@ -19,22 +19,23 @@ export type HarvestedCommit = {
 export async function harvestDayCommits(
   cwd: string,
   date: string,
+  opts?: { authorEmail?: string },
 ): Promise<HarvestedCommit[]> {
   const since = `${date} 00:00:00`;
   const until = `${date} 23:59:59`;
   try {
-    const { stdout } = await execFileAsync(
-      "git",
-      [
-        "log",
-        "--all",
-        `--since=${since}`,
-        `--until=${until}`,
-        "--pretty=format:%H%x09%aI%x09%s",
-        "--no-show-signature",
-      ],
-      { cwd, timeout: 8_000 },
-    );
+    const args = [
+      "log",
+      "--all",
+      `--since=${since}`,
+      `--until=${until}`,
+      "--pretty=format:%H%x09%aI%x09%s",
+      "--no-show-signature",
+    ];
+    if (opts?.authorEmail?.trim()) {
+      args.push(`--author=${opts.authorEmail.trim()}`);
+    }
+    const { stdout } = await execFileAsync("git", args, { cwd, timeout: 8_000 });
     const out: HarvestedCommit[] = [];
     for (const line of stdout.split(/\r?\n/)) {
       if (!line.trim()) continue;
@@ -80,6 +81,20 @@ export function mergeCommitEvents(
   );
   const extra = harvested.filter((e) => !seen.has(e.text.replace(/\s+/g, " ")));
   return [...existing, ...extra].sort((a, b) => a.at - b.at);
+}
+
+/** Read `git config user.email` for `cwd`, returning null outside a repo or when unset. */
+export async function readGitUserEmail(cwd: string): Promise<string | null> {
+  try {
+    const { stdout } = await execFileAsync("git", ["config", "user.email"], {
+      cwd,
+      timeout: 3_000,
+    });
+    const email = stdout.trim();
+    return email || null;
+  } catch {
+    return null;
+  }
 }
 
 export { atFrom };

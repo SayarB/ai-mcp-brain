@@ -29,6 +29,7 @@ export {
   DaemonStateStore,
   DAEMON_STATE_SCHEMA_VERSION,
   defaultDaemonStateDbPath,
+  PendingStateConflictError,
   type AccessLogEntry,
   type AccessLogInput,
   type AccessLogQuery,

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Optional Claude Code SessionStart / SessionEnd hook for Hem Vault (ai-mcp-brain).
-# Fail-open: never blocks a session.
+# Fail-open: never blocks a session. Note: SessionEnd captures today's own git commit subjects
+# in the repo (pass text via `brain capture --text ...` or POST /api/ingest-session for prose summaries).
 #
 # Usage in ~/.claude/settings.json:
 #   "hooks": {
@@ -30,11 +31,31 @@ if [[ -z "$repo_root" || "$repo_root" == "__BRAIN_REPO_ROOT__" || ! -f "$repo_ro
   exit 0
 fi
 
+run_cli() {
+  if command -v bun >/dev/null 2>&1; then
+    bun "$repo_root/src/cli.ts" "$@"
+  elif [[ -x "$repo_root/node_modules/.bin/tsx" ]]; then
+    "$repo_root/node_modules/.bin/tsx" "$repo_root/src/cli.ts" "$@"
+  else
+    npx --no-install tsx "$repo_root/src/cli.ts" "$@"
+  fi
+}
+
+run_with_timeout() {
+  local secs="$1"
+  shift
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "$secs" "$@"
+  else
+    "$@"
+  fi
+}
+
 cd "$repo_root" || exit 0
 if [[ "$kind" == "session-start" ]]; then
   # Print compact token-budgeted context briefing for SessionStart injection
-  npx --yes tsx src/cli.ts bootstrap --max-chars 3200 ${cwd:+--cwd "$cwd"} 2>/dev/null || true
+  run_with_timeout 8 run_cli bootstrap --no-embed --max-chars 3200 ${cwd:+--cwd "$cwd"} 2>/dev/null || true
 elif [[ "$kind" == "session-end" && "${BRAIN_PASSIVE_CAPTURE:-1}" != "0" ]]; then
-  npx --yes tsx src/cli.ts capture --app claude ${session:+--session "$session"} ${cwd:+--cwd "$cwd"} >/dev/null 2>&1 || true
+  (run_with_timeout 10 run_cli capture --fail-open --app claude ${session:+--session "$session"} ${cwd:+--cwd "$cwd"} >/dev/null 2>&1 || true) &
 fi
 exit 0

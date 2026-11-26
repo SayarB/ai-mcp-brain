@@ -5,7 +5,11 @@ import { join } from "node:path";
 import { describe, it } from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { DaemonStateStore, startBrainDaemon } from "../daemon/index.ts";
+import {
+  DaemonStateStore,
+  PendingStateConflictError,
+  startBrainDaemon,
+} from "../daemon/index.ts";
 import { syncVaultIndex, type Embedder } from "../index/index.ts";
 import { readText, writeText } from "../runtime.ts";
 import {
@@ -241,7 +245,7 @@ describe("Milestone 4: bootstrap_context, passive capture queue & brain dream co
       assert.equal(applied.dryRun, false);
       assert.equal(applied.actionsApplied.duplicatesConsolidated, 1);
       assert.equal(applied.actionsApplied.supersededArchivedAndPruned, 1);
-      assert.ok(applied.actionsApplied.archivePath?.startsWith("_meta/archive/memories-"));
+      assert.ok(applied.actionsApplied.archivePath?.startsWith("_meta/archive/global-memories-"));
 
       // Verify keeper kept merged tags and duplicate is now status=superseded
       const projAll = await listMemories(vault, { scope: "project", project: "alpha", status: "all" });
@@ -252,7 +256,7 @@ describe("Milestone 4: bootstrap_context, passive capture queue & brain dream co
       assert.ok(keeper.tags.includes("postgres"));
       assert.ok(keeper.tags.includes("serverless"));
 
-      // Verify stale superseded memory was losslessly archived before pruning
+      // Verify stale superseded memory was losslessly archived into global archive before pruning
       const archiveContent = await readText(join(vault, applied.actionsApplied.archivePath!));
       assert.ok(archiveContent.includes("m_old00001"));
       assert.ok(archiveContent.includes("Old service ran on port 8080."));
@@ -442,6 +446,270 @@ describe("Milestone 4: bootstrap_context, passive capture queue & brain dream co
       await Promise.all([roClient.close(), rwClient.close()]);
     } finally {
       await daemon.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("Opus M4 regressions: B1 concurrent dream runs, B2 scoped dream archive ACL, M1/M2 pending state machine, M3 scoped ingest dedup, M4 ingest deniedTools + access_log, and Minors", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ai-mcp-brain-m4-reg-"));
+    const vault = join(root, "vault");
+    const indexDb = join(root, "index.sqlite");
+    const stateDb = join(root, "daemon.sqlite");
+    const adminToken = makeSynth(24, 3);
+    const alphaToken = makeSynth(24, 11);
+    const blockedToken = makeSynth(24, 19);
+
+    try {
+      // Seed stale superseded memories in BOTH alpha and beta for B1 & B2
+      await writeText(
+        join(vault, "projects/alpha/memories.md"),
+        [
+          "---",
+          "type: memory",
+          "scope: project",
+          "project: alpha",
+          "updated: 2024-05-01",
+          "---",
+          "",
+          "# Alpha Memories",
+          "",
+          "### Alpha legacy endpoint",
+          "<!-- mem:id=m_aold0001 status=superseded app=cli category=facts created=2024-01-01 updated=2024-05-01 -->",
+          "Alpha legacy archive marker ALPHA_ARCHIVE_SECRET.",
+          "<!-- /mem:m_aold0001 -->",
+          "",
+        ].join("\n"),
+      );
+      await writeText(
+        join(vault, "projects/beta/memories.md"),
+        [
+          "---",
+          "type: memory",
+          "scope: project",
+          "project: beta",
+          "updated: 2024-05-01",
+          "---",
+          "",
+          "# Beta Memories",
+          "",
+          "### Beta legacy pricing",
+          "<!-- mem:id=m_bold0001 status=superseded app=cli category=facts created=2024-01-01 updated=2024-05-01 -->",
+          "Beta top secret archive BETA_TOPSECRET_PRICING.",
+          "<!-- /mem:m_bold0001 -->",
+          "",
+        ].join("\n"),
+      );
+      // Active beta memory for M3 cross-project dedup oracle test
+      await addMemoryRaw(vault, {
+        title: "Stripe billing for beta",
+        content: "Decided to use Stripe Billing for beta customer invoices.",
+        scope: "project",
+        project: "beta",
+        category: "decisions",
+      });
+
+      // B1: Two overlapping dream --apply runs must NEVER drop archived memories
+      const [dreamA, dreamB] = await Promise.all([
+        runDreamConsolidation(vault, { apply: true, project: "alpha", pruneDays: 90, dbPath: indexDb, embedder: null }),
+        runDreamConsolidation(vault, { apply: true, project: "beta", pruneDays: 90, dbPath: indexDb, embedder: null }),
+      ]);
+      assert.equal(dreamA.actionsApplied.supersededArchivedAndPruned, 1);
+      assert.equal(dreamB.actionsApplied.supersededArchivedAndPruned, 1);
+      assert.ok(dreamA.actionsApplied.archivePath?.startsWith("projects/alpha/archive/memories-"));
+      assert.ok(dreamB.actionsApplied.archivePath?.startsWith("projects/beta/archive/memories-"));
+
+      const alphaArch = await readText(join(vault, dreamA.actionsApplied.archivePath!));
+      const betaArch = await readText(join(vault, dreamB.actionsApplied.archivePath!));
+      assert.ok(alphaArch.includes("ALPHA_ARCHIVE_SECRET"));
+      assert.ok(betaArch.includes("BETA_TOPSECRET_PRICING"));
+      await syncVaultIndex(vault, { dbPath: indexDb, embedder: null });
+
+      const daemon = await startBrainDaemon({
+        vaultPath: vault,
+        port: 0,
+        authToken: adminToken,
+        appTokens: {
+          "alpha-app": alphaToken,
+          "blocked-app": blockedToken,
+        },
+        stateDbPath: stateDb,
+        indexDbPath: indexDb,
+        embedder: null,
+        warmup: false,
+        watchVault: false,
+        quiet: true,
+        configApps: {
+          "alpha-app": {
+            mode: "read-write",
+            read_scopes: ["global", "project"],
+            write_scopes: ["global", "project"],
+            allowed_projects: ["alpha"],
+          },
+          "blocked-app": {
+            mode: "read-write",
+            denied_tools: ["*"],
+          },
+        },
+      });
+
+      const alphaClient = new Client({ name: "alpha-app", version: "1.0.0" });
+      try {
+        await alphaClient.connect(
+          new StreamableHTTPClientTransport(new URL(daemon.mcpUrl), {
+            requestInit: { headers: { Authorization: `Bearer ${alphaToken}` } },
+          }),
+        );
+
+        // B2: alpha-app (even with global read access!) CANNOT read or search beta's archived memory
+        const readBetaArch = await alphaClient.callTool({
+          name: "read_note",
+          arguments: { path: dreamB.actionsApplied.archivePath! },
+        });
+        assert.equal(readBetaArch.isError, true);
+        assert.match(textOf(readBetaArch), /ACL denied/i);
+
+        const searchBetaArch = await alphaClient.callTool({
+          name: "search_notes",
+          arguments: { query: "BETA_TOPSECRET_PRICING", mode: "fts" },
+        });
+        assert.ok(!searchBetaArch.isError);
+        const searchBetaText = textOf(searchBetaArch);
+        assert.match(searchBetaText, /No notes matched/i);
+        assert.ok(!searchBetaText.includes("projects/beta/archive"));
+        assert.ok(!searchBetaText.includes("Beta top secret archive"));
+
+        // M3: Ingesting text identical to beta's memory into alpha does NOT leak skippedDuplicates
+        const m3Res = await fetch(`${daemon.url}/api/ingest-session`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${alphaToken}`,
+          },
+          body: JSON.stringify({
+            summary: "Decided to use Stripe Billing for beta customer invoices.",
+            project: "alpha",
+          }),
+        });
+        assert.equal(m3Res.status, 200);
+        const m3Json = (await m3Res.json()) as { staged: { id: string }[]; skippedDuplicates: number };
+        assert.equal(m3Json.skippedDuplicates, 0);
+        assert.equal(m3Json.staged.length, 1);
+
+        // M4: deniedTools ["*"] blocks POST /api/ingest-session (403) AND logs both calls in access_log
+        const m4Res = await fetch(`${daemon.url}/api/ingest-session`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${blockedToken}`,
+          },
+          body: JSON.stringify({
+            summary: "Decided to bypass everything via ingest.",
+            project: "alpha",
+          }),
+        });
+        assert.equal(m4Res.status, 403);
+
+        const logsRes = await fetch(`${daemon.url}/api/logs?tool=ingest_session`, {
+          headers: { Authorization: `Bearer ${adminToken}` },
+        });
+        const logsJson = (await logsRes.json()) as { logs: { app: string; status: string }[] };
+        assert.ok(logsJson.logs.some((l) => l.app === "alpha-app" && l.status === "ok"));
+        assert.ok(logsJson.logs.some((l) => l.app === "blocked-app" && l.status === "denied"));
+
+        // M1: Approving then dismissing returns 409 Conflict and preserves status="approved"
+        const pid = m3Json.staged[0]!.id;
+        const appRes = await fetch(`${daemon.url}/api/pending/${pid}/approve`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${adminToken}`,
+          },
+          body: JSON.stringify({}),
+        });
+        assert.equal(appRes.status, 200);
+
+        const disAfterApp = await fetch(`${daemon.url}/api/pending/${pid}/dismiss`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${adminToken}`,
+          },
+          body: JSON.stringify({}),
+        });
+        assert.equal(disAfterApp.status, 409);
+        assert.equal(daemon.stateStore.getPendingMemory(pid)?.status, "approved");
+
+        // M2: Simulated crash mid-approval leaves status="approving" and staleAfterMs=0 reclaims & completes cleanly
+        const stuck = daemon.stateStore.stagePendingMemory({
+          title: "Crash recovery test",
+          content: "Decided to verify crash recovery on approving rows.",
+          scope: "project",
+          project: "alpha",
+          category: "decisions",
+          app: "alpha-app",
+        });
+        const claimed = daemon.stateStore.claimPendingMemory(stuck.id);
+        assert.ok(claimed);
+        assert.equal(daemon.stateStore.getPendingMemory(stuck.id)?.status, "approving");
+        assert.throws(
+          () => daemon.stateStore.dismissPendingMemory(stuck.id),
+          PendingStateConflictError,
+        );
+        const recovered = await approvePendingMemory(vault, daemon.stateStore, stuck.id, {
+          indexDbPath: indexDb,
+          embedder: null,
+          staleAfterMs: 0,
+        });
+        assert.equal(recovered.pending.status, "approved");
+
+        // Minor #1: approve_pending_memory with scope="project" and no project rejects cleanly
+        const globalCand = daemon.stateStore.stagePendingMemory({
+          title: "Global cand",
+          content: "Prefer strict checks.",
+          scope: "global",
+          category: "preferences",
+          app: "alpha-app",
+        });
+        const missingProj = await alphaClient.callTool({
+          name: "approve_pending_memory",
+          arguments: { id: globalCand.id, scope: "project" },
+        });
+        assert.equal(missingProj.isError, true);
+        assert.match(textOf(missingProj), /project is required/i);
+
+        // Minor #3: SQL ACL push-down finds alpha pending row past 5 newer beta rows with limit=1
+        const alphaRow = daemon.stateStore.stagePendingMemory({
+          title: "Older alpha row",
+          content: "Alpha pending entry.",
+          scope: "project",
+          project: "alpha",
+          category: "facts",
+          app: "alpha-app",
+        });
+        for (let i = 0; i < 5; i++) {
+          daemon.stateStore.stagePendingMemory({
+            title: `Newer beta row ${i}`,
+            content: `Beta entry ${i}.`,
+            scope: "project",
+            project: "beta",
+            category: "facts",
+            app: "beta-app",
+          });
+        }
+        const listedAlpha = await alphaClient.callTool({
+          name: "list_pending_memories",
+          arguments: { scope: "project", limit: 1 },
+        });
+        assert.ok(!listedAlpha.isError);
+        const listedJson = JSON.parse(textOf(listedAlpha)) as { pending: { id: string }[] };
+        assert.equal(listedJson.pending.length, 1);
+        assert.equal(listedJson.pending[0]?.id, alphaRow.id);
+
+        await alphaClient.close();
+      } finally {
+        await daemon.close();
+      }
+    } finally {
       await rm(root, { recursive: true, force: true });
     }
   });

@@ -24,11 +24,31 @@ if [[ -z "$repo_root" || "$repo_root" == "__BRAIN_REPO_ROOT__" || ! -f "$repo_ro
   exit 0
 fi
 
-cd "$repo_root" || exit 0
-npx --yes tsx src/cli.ts work-event --kind "$kind" ${session:+--session "$session"} >/dev/null 2>&1 || true
+run_cli() {
+  if command -v bun >/dev/null 2>&1; then
+    bun "$repo_root/src/cli.ts" "$@"
+  elif [[ -x "$repo_root/node_modules/.bin/tsx" ]]; then
+    "$repo_root/node_modules/.bin/tsx" "$repo_root/src/cli.ts" "$@"
+  else
+    npx --no-install tsx "$repo_root/src/cli.ts" "$@"
+  fi
+}
 
-# On session-end, passively stage high-signal candidates into the Pending Approval Queue (fail-open)
+run_with_timeout() {
+  local secs="$1"
+  shift
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "$secs" "$@"
+  else
+    "$@"
+  fi
+}
+
+cd "$repo_root" || exit 0
+run_with_timeout 6 run_cli work-event --kind "$kind" ${session:+--session "$session"} >/dev/null 2>&1 || true
+
+# On session-end, passively capture today's own git commit subjects in the background (fail-open)
 if [[ "$kind" == "session-end" && "${BRAIN_PASSIVE_CAPTURE:-1}" != "0" ]]; then
-  npx --yes tsx src/cli.ts capture --app cursor ${session:+--session "$session"} ${cwd:+--cwd "$cwd"} >/dev/null 2>&1 || true
+  (run_with_timeout 10 run_cli capture --fail-open --app cursor ${session:+--session "$session"} ${cwd:+--cwd "$cwd"} >/dev/null 2>&1 || true) &
 fi
 exit 0

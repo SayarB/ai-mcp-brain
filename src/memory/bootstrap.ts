@@ -154,11 +154,11 @@ export async function bootstrapContext(
     }
   }
 
-  // 3. Task-focused semantic recall (when task is provided)
+  // 3. Task-focused semantic recall (when task is provided and at least one scope is readable)
   let taskMemoryHits: MemorySearchHit[] = [];
   let taskNoteHits: HybridSearchHit[] = [];
   const task = opts.task?.trim();
-  if (task) {
+  if (task && (includeGlobal || canReadProject)) {
     const memSearch = await searchMemories(vaultPath, task, {
       limit: 10,
       project: canReadProject && !includeGlobal ? canonicalProject! : undefined,
@@ -174,6 +174,7 @@ export async function bootstrapContext(
     taskMemoryHits = memSearch.hits
       .filter((h) => {
         if (seenIds.has(h.memory.id)) return false;
+        if (!includeGlobal && h.memory.scope === "global") return false;
         return !policy || canReadTarget(policy, h.memory.scope, h.memory.project);
       })
       .slice(0, 5);
@@ -189,6 +190,7 @@ export async function bootstrapContext(
       for (const hit of noteSearch.hits) {
         if (taskNoteHits.length >= 3) break;
         if (projectNotesIncluded.includes(hit.path)) continue;
+        if (!includeGlobal && hit.scope === "global" && !hit.project) continue;
         if (!(await canReadRealPath(vaultPath, policy, hit.path))) continue;
         if (
           policy &&
@@ -202,16 +204,8 @@ export async function bootstrapContext(
     }
   }
 
-  // 4. Count pending memories visible to this caller
-  let pendingCount = 0;
-  if (opts.stateStore) {
-    if (!policy) {
-      pendingCount = opts.stateStore.countPendingMemories();
-    } else {
-      const pending = opts.stateStore.listPendingMemories({ status: "pending", limit: 200 });
-      pendingCount = pending.filter((p) => canReadTarget(policy, p.scope, p.project)).length;
-    }
-  }
+  // 4. Count pending memories visible to this caller (SQL ACL push-down; no 200-row cap)
+  const pendingCount = opts.stateStore ? opts.stateStore.countPendingMemories(policy) : 0;
 
   // 5. Assemble token-budgeted Markdown (priority order: header -> project mems -> task hits -> global mems -> project pack)
   const sections: string[] = [];

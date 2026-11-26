@@ -3,14 +3,22 @@
  *
  * Extracts durable candidate memories (decisions, preferences, gotchas, facts)
  * deterministically offline from session summaries, transcripts, and/or recent git commits.
- * Every candidate is secret-scanned and deduplicated against active + pending memories
- * BEFORE staging into `pending_memories` for human/agent review.
+ * Every candidate is secret-scanned and deduplicated ONLY within its own `(scope, project)`
+ * bucket (and readable ACL scope) BEFORE staging into `pending_memories`.
  */
 import { basename } from "node:path";
-import type { DaemonStateStore, PendingMemoryRecord } from "../daemon/state.ts";
+import {
+  PendingStateConflictError,
+  type DaemonStateStore,
+  type PendingMemoryRecord,
+} from "../daemon/state.ts";
 import { tokenizeForFts, type Embedder } from "../index/index.ts";
 import { resolveProjectSlug } from "../vault.ts";
-import { harvestDayCommits, type HarvestedCommit } from "../work/git.ts";
+import {
+  harvestDayCommits,
+  readGitUserEmail,
+  type HarvestedCommit,
+} from "../work/git.ts";
 import { addMemorySmart, type AddMemorySmartResult } from "./extract.ts";
 import { scanForSecrets } from "./guard.ts";
 import {
@@ -39,7 +47,7 @@ export type SessionIngestInput = {
   diff?: string;
   /** Explicit commit subjects/messages to inspect. */
   commits?: string[];
-  /** Optional working directory; if given, harvests today's git commits & infers project slug. */
+  /** Optional working directory; if given, harvests today's own git commits & infers project slug. */
   cwd?: string;
   /** Optional git repo slug/path/remote override. */
   project?: string;
@@ -49,8 +57,10 @@ export type SessionIngestInput = {
   session?: string;
   /** Max candidates to stage from one session (default 8). */
   maxCandidates?: number;
-  /** Optional filter predicate (e.g. ACL `canWriteTarget`) applied before staging each candidate. */
+  /** Optional write-ACL filter applied before dedup/staging each candidate. */
   allowCandidate?: (candidate: ExtractedCandidate) => boolean;
+  /** Optional read-ACL filter controlling which buckets may be consulted for duplicate checks. */
+  canReadScope?: (scope: MemoryScope, project: string | null) => boolean;
 };
 
 export type SessionIngestResult = {
@@ -105,6 +115,14 @@ const SIGNAL_RULES: {
 const NOISY_COMMIT_RE =
   /^(?:wip\b|merge\b|revert\b|bump\b|chore\(deps\)|fixup!|squash!|style:|fmt\b|format\b|typo\b|lint\b)/i;
 
+function localDateIso(): string {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, "0");
+  const d = String(now.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
 function normalizeForDedup(text: string): string {
   return text
     .normalize("NFKC")
@@ -150,13 +168,11 @@ function buildConciseTitle(text: string, fallbackPrefix: string): string {
 
 function splitCandidateUnits(text: string): string[] {
   const units: string[] = [];
-  // Strip fenced code blocks so code snippets aren't misread as prose memories
   const withoutFences = text.replace(/```[\s\S]*?```/g, "\n").replace(/~~~[\s\S]*?~~~/g, "\n");
   for (const rawLine of withoutFences.split(/\r?\n/)) {
     const line = rawLine.replace(/^\s*(?:[-*•>]+|\d+\.)\s*/, "").trim();
     if (line.length < 20 || line.length > 600) continue;
     if (line.startsWith("#")) continue;
-    // Skip stack frames and log noise
     if (/^\s*at\s+\S+\s+\(/.test(line) || /^(?:Error|TypeError|ReferenceError):/.test(line)) {
       continue;
     }
@@ -164,7 +180,6 @@ function splitCandidateUnits(text: string): string[] {
       units.push(line);
       continue;
     }
-    // Split long paragraphs on sentence boundaries
     for (const sentence of line.split(/(?<=[.!])\s+(?=[A-Z])/)) {
       const s = sentence.trim();
       if (s.length >= 20 && s.length <= 360) units.push(s);
@@ -194,7 +209,14 @@ export function extractSessionCandidates(opts: {
       skippedSecrets++;
       return;
     }
-    if (extracted.some((e) => isNearDuplicateText(`${e.title} ${e.content}`, `${cand.title} ${cand.content}`))) {
+    if (
+      extracted.some(
+        (e) =>
+          e.scope === cand.scope &&
+          e.project === cand.project &&
+          isNearDuplicateText(`${e.title} ${e.content}`, `${cand.title} ${cand.content}`),
+      )
+    ) {
       return;
     }
     extracted.push(cand);
@@ -212,7 +234,15 @@ export function extractSessionCandidates(opts: {
     for (const rule of SIGNAL_RULES) {
       if (!rule.regex.test(unit)) continue;
       const scope: MemoryScope =
-        project && !rule.preferGlobal ? "project" : project && /\b(?:this repo|in this project|for this service)\b/i.test(unit) ? "project" : rule.preferGlobal ? "global" : project ? "project" : "global";
+        project && !rule.preferGlobal
+          ? "project"
+          : project && /\b(?:this repo|in this project|for this service)\b/i.test(unit)
+            ? "project"
+            : rule.preferGlobal
+              ? "global"
+              : project
+                ? "project"
+                : "global";
       tryPush({
         title: buildConciseTitle(unit, `${rule.category} note`),
         content: unit,
@@ -236,8 +266,12 @@ export function extractSessionCandidates(opts: {
       continue;
     }
 
-    const isFix = /^(?:fix|bugfix|hotfix)\b/i.test(subject) || /\b(?:race|deadlock|leak|bypass|traversal|corruption)\b/i.test(subject);
-    const isArch = /^(?:feat|refactor|perf|arch)\b/i.test(subject) || /\b(?:migrate|switch|replace|add|implement|enforce)\b/i.test(subject);
+    const isFix =
+      /^(?:fix|bugfix|hotfix)\b/i.test(subject) ||
+      /\b(?:race|deadlock|leak|bypass|traversal|corruption)\b/i.test(subject);
+    const isArch =
+      /^(?:feat|refactor|perf|arch)\b/i.test(subject) ||
+      /\b(?:migrate|switch|replace|add|implement|enforce)\b/i.test(subject);
     if (!isFix && !isArch) continue;
 
     const category: MemoryCategory = isFix ? "gotchas" : "decisions";
@@ -261,9 +295,14 @@ export function extractSessionCandidates(opts: {
   };
 }
 
+function scopeKey(scope: MemoryScope, project: string | null): string {
+  return `${scope}|${scope === "project" ? (project ?? "") : ""}`;
+}
+
 /**
- * Extract candidates from session input (+ optional today's git commits in `cwd`),
- * deduplicate against active vault memories & existing pending items, and stage into `pending_memories`.
+ * Extract candidates from session input (+ optional today's local-time own git commits in `cwd`),
+ * deduplicate ONLY within the candidate's own `(scope, project)` bucket (and readable ACL scope),
+ * and stage into `pending_memories`.
  */
 export async function ingestSessionToPending(
   vaultPath: string,
@@ -282,8 +321,13 @@ export async function ingestSessionToPending(
 
   const commits: string[] = [...(input.commits ?? [])];
   if (input.cwd?.trim()) {
-    const today = new Date().toISOString().slice(0, 10);
-    const harvested: HarvestedCommit[] = await harvestDayCommits(input.cwd.trim(), today);
+    const todayLocal = localDateIso();
+    const authorEmail = await readGitUserEmail(input.cwd.trim());
+    const harvested: HarvestedCommit[] = await harvestDayCommits(
+      input.cwd.trim(),
+      todayLocal,
+      authorEmail ? { authorEmail } : undefined,
+    );
     for (const c of harvested) {
       if (c.subject) commits.push(c.subject);
     }
@@ -307,13 +351,23 @@ export async function ingestSessionToPending(
     };
   }
 
-  // Load existing pending + active vault memories for duplicate suppression
+  // Group existing pending + active vault memories strictly by (scope, project) bucket so dedup
+  // never crosses project boundaries or leaks existence of memories from another project!
   const existingPending = stateStore.listPendingMemories({ status: "pending", limit: 200 });
-  const existingActive = await listMemories(vaultPath, { status: "active", limit: 300 });
-  const existingBodies = [
-    ...existingPending.map((p) => `${p.title} ${p.content}`),
-    ...existingActive.map((m) => `${m.title} ${m.content}`),
-  ];
+  const existingActive = await listMemories(vaultPath, { status: "active", limit: 400 });
+  const buckets = new Map<string, string[]>();
+  const addToBucket = (scope: MemoryScope, project: string | null, text: string) => {
+    const key = scopeKey(scope, project);
+    const list = buckets.get(key) ?? [];
+    list.push(text);
+    buckets.set(key, list);
+  };
+  for (const p of existingPending) {
+    addToBucket(p.scope, p.project, `${p.title} ${p.content}`);
+  }
+  for (const m of existingActive) {
+    addToBucket(m.scope, m.project, `${m.title} ${m.content}`);
+  }
 
   const staged: PendingMemoryRecord[] = [];
   let skippedDuplicates = 0;
@@ -325,7 +379,11 @@ export async function ingestSessionToPending(
       continue;
     }
     const candText = `${cand.title} ${cand.content}`;
-    if (existingBodies.some((ex) => isNearDuplicateText(ex, candText))) {
+    const mayCheckDedup = !input.canReadScope || input.canReadScope(cand.scope, cand.project);
+    const key = scopeKey(cand.scope, cand.project);
+    const bucket = mayCheckDedup ? (buckets.get(key) ?? []) : [];
+
+    if (mayCheckDedup && bucket.some((ex) => isNearDuplicateText(ex, candText))) {
       skippedDuplicates++;
       continue;
     }
@@ -342,7 +400,7 @@ export async function ingestSessionToPending(
       confidence: cand.confidence,
     });
     staged.push(rec);
-    existingBodies.push(candText);
+    addToBucket(cand.scope, cand.project, candText);
   }
 
   return {
@@ -364,6 +422,8 @@ export type ApprovePendingOverrides = {
   app?: string;
   indexDbPath?: string;
   embedder?: Embedder | null;
+  /** Override stale `approving` reclaim threshold in ms (default 5 min). */
+  staleAfterMs?: number;
 };
 
 /** Atomically claim a pending candidate, promote it to vault Markdown via `addMemorySmart`, and mark approved. */
@@ -373,13 +433,15 @@ export async function approvePendingMemory(
   pendingId: string,
   overrides: ApprovePendingOverrides = {},
 ): Promise<{ pending: PendingMemoryRecord; promoted: AddMemorySmartResult }> {
-  const claimed = stateStore.claimPendingMemory(pendingId);
+  const claimed = stateStore.claimPendingMemory(pendingId, {
+    staleAfterMs: overrides.staleAfterMs,
+  });
   if (!claimed) {
     const existing = stateStore.getPendingMemory(pendingId);
     if (!existing) {
       throw new Error(`Pending memory not found: ${pendingId}`);
     }
-    throw new Error(`Pending memory ${pendingId} is already ${existing.status}.`);
+    throw new PendingStateConflictError(pendingId, existing.status, "approve");
   }
 
   try {
@@ -388,6 +450,9 @@ export async function approvePendingMemory(
       scope === "project"
         ? (overrides.project?.trim() || claimed.project || undefined)
         : undefined;
+    if (scope === "project" && !project) {
+      throw new Error("Project slug is required when approving a project-scoped memory.");
+    }
     const promoted = await addMemorySmart(vaultPath, {
       title: overrides.title?.trim() || claimed.title,
       content: overrides.content?.trim() || claimed.content,
